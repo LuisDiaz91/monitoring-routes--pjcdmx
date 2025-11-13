@@ -7,12 +7,17 @@ from telebot import types
 
 print("🚀 INICIANDO BOT COMPLETO PJCDMX EN NUBE...")
 
-# CONFIGURACIÓN OPTIMIZADA PARA RAILWAY
-TOKEN = os.environ.get("BOT_TOKEN", "7913463398:AAHA_h9zD9WN_tc3fVv8b81Mdtk9gMGPe5E")
+# CONFIGURACIÓN SEGURA - TOKEN SOLO EN VARIABLES DE ENTORNO
+TOKEN = os.environ.get("BOT_TOKEN")
+if not TOKEN:
+    print("❌ ERROR: BOT_TOKEN no configurado en Railway")
+    print("💡 Ve a Railway → Variables → Agrega BOT_TOKEN")
+    exit(1)
+
 bot = telebot.TeleBot(TOKEN)
 
 # BASE DE DATOS (SQLite funciona en Railway)
-conn = sqlite3.connect('/tmp/incidentes.db', check_same_thread=False)  # Cambiado a /tmp para Railway
+conn = sqlite3.connect('/tmp/incidentes.db', check_same_thread=False)
 cursor = conn.cursor()
 cursor.execute('''
 CREATE TABLE IF NOT EXISTS incidentes (
