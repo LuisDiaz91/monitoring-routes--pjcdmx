@@ -41,7 +41,7 @@ print("🗃️ Base de datos lista")
 # SISTEMA DE RUTAS AUTOMÁTICO
 RUTAS_DISPONIBLES = []
 RUTAS_ASIGNADAS = {}  # user_id -> ruta_id
-ADMIN_IDS = [123456789]  # ⚠️ CAMBIA POR TU USER_ID DE TELEGRAM
+ADMIN_IDS = [7800992671]  # ⚠️ CAMBIA POR TU USER_ID DE TELEGRAM
 
 # CREAR CARPETAS
 for carpeta in ['rutas_telegram', 'avances_ruta', 'incidencias_trafico', 'fotos_acuses', 'data']:
