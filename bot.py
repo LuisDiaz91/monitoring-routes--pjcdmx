@@ -4,20 +4,21 @@ import sqlite3
 import time
 import requests
 import json
+import pandas as pd
 from telebot import types
+from datetime import datetime
 
-print("🚀 INICIANDO BOT COMPLETO PJCDMX CON SISTEMA DE RUTAS...")
+print("🚀 INICIANDO BOT COMPLETO PJCDMX - SISTEMA AUTOMÁTICO DE RUTAS...")
 
-# CONFIGURACIÓN SEGURA - TOKEN SOLO EN VARIABLES DE ENTORNO
+# CONFIGURACIÓN SEGURA
 TOKEN = os.environ.get("BOT_TOKEN")
 if not TOKEN:
     print("❌ ERROR: BOT_TOKEN no configurado en Railway")
-    print("💡 Ve a Railway → Variables → Agrega BOT_TOKEN")
     exit(1)
 
 bot = telebot.TeleBot(TOKEN)
 
-# BASE DE DATOS (SQLite funciona en Railway)
+# BASE DE DATOS
 conn = sqlite3.connect('/tmp/incidentes.db', check_same_thread=False)
 cursor = conn.cursor()
 cursor.execute('''
@@ -33,40 +34,45 @@ CREATE TABLE IF NOT EXISTS incidentes (
 )
 ''')
 conn.commit()
-print("🗃️ Base de datos lista en /tmp/")
+print("🗃️ Base de datos lista")
 
-# CREAR CARPETAS PARA SISTEMA DE RUTAS
-for carpeta in ['rutas_telegram', 'avances_ruta', 'incidencias_trafico', 'fotos_acuses']:
+# SISTEMA DE RUTAS AUTOMÁTICO
+RUTAS_DISPONIBLES = []
+RUTAS_ASIGNADAS = {}  # user_id -> ruta_id
+ADMIN_IDS = [123456789]  # ⚠️ CAMBIA POR TU USER_ID DE TELEGRAM
+
+# CREAR CARPETAS
+for carpeta in ['rutas_telegram', 'avances_ruta', 'incidencias_trafico', 'fotos_acuses', 'data']:
     os.makedirs(carpeta, exist_ok=True)
-print("📁 Carpetas del sistema de rutas creadas")
+print("📁 Carpetas del sistema creadas")
 
-# FUNCIÓN NOTIFICACIÓN ADMIN
-def notificar_admin(mensaje):
-    print(f"📢 ADMIN: {mensaje}")
+# =============================================================================
+# FUNCIONES DEL SISTEMA DE RUTAS
+# =============================================================================
 
-# FUNCIONES PARA SISTEMA DE RUTAS
-def obtener_rutas_usuario(user_id):
-    """Obtener rutas asignadas a un usuario"""
-    try:
-        rutas_asignadas = []
-        if os.path.exists('rutas_telegram'):
-            for archivo in os.listdir('rutas_telegram'):
-                if archivo.endswith('.json'):
+def cargar_rutas_disponibles():
+    """Cargar todas las rutas disponibles para asignación automática"""
+    global RUTAS_DISPONIBLES
+    RUTAS_DISPONIBLES = []
+    
+    if os.path.exists('rutas_telegram'):
+        for archivo in os.listdir('rutas_telegram'):
+            if archivo.endswith('.json'):
+                try:
                     with open(f'rutas_telegram/{archivo}', 'r', encoding='utf-8') as f:
                         ruta = json.load(f)
-                        # Asignar por user_id o por nombre de repartidor
-                        repartidor_asignado = ruta.get('repartidor_asignado')
-                        if (repartidor_asignado == f"user_{user_id}" or 
-                            repartidor_asignado == str(user_id)):
-                            rutas_asignadas.append(ruta)
-        return rutas_asignadas
-    except Exception as e:
-        print(f"❌ Error obteniendo rutas: {e}")
-        return []
+                        if ruta.get('estado') == 'pendiente':
+                            RUTAS_DISPONIBLES.append(ruta)
+                except Exception as e:
+                    print(f"❌ Error cargando ruta {archivo}: {e}")
+    
+    print(f"🔄 Rutas disponibles cargadas: {len(RUTAS_DISPONIBLES)}")
+    return len(RUTAS_DISPONIBLES)
 
-def formatear_ruta_telegram(ruta):
-    """Formatear información de ruta para Telegram"""
-    texto = f"*🗺️ RUTA {ruta['ruta_id']} - {ruta['zona']}*\n\n"
+def formatear_ruta_para_repartidor(ruta):
+    """Formatear ruta para mostrar al repartidor"""
+    texto = f"*🗺️ RUTA ASIGNADA - {ruta['zona']}*\n\n"
+    texto += f"*ID Ruta:* {ruta['ruta_id']}\n"
     texto += f"*Paradas:* {len(ruta['paradas'])}\n"
     texto += f"*Distancia:* {ruta['estadisticas']['distancia_km']} km\n"
     texto += f"*Tiempo estimado:* {ruta['estadisticas']['tiempo_min']} min\n\n"
@@ -75,122 +81,364 @@ def formatear_ruta_telegram(ruta):
     entregadas = len([p for p in ruta['paradas'] if p.get('estado') == 'entregado'])
     texto += f"*Progreso:* {entregadas}/{len(ruta['paradas'])} entregadas\n\n"
     
-    # Botón para abrir en Google Maps
-    texto += f"[📍 Abrir en Google Maps]({ruta['google_maps_url']})\n\n"
+    texto += "*📍 PARADAS:*\n"
+    for parada in ruta['paradas'][:5]:  # Mostrar máximo 5
+        estado = "✅" if parada.get('estado') == 'entregado' else "⏳"
+        texto += f"{estado} *{parada['orden']}. {parada['nombre']}*\n"
+        texto += f"   🏢 {parada['dependencia']}\n"
+        texto += f"   🏠 {parada['direccion'][:35]}...\n\n"
     
-    texto += "*Próximas paradas:*\n"
-    for parada in ruta['paradas'][:3]:  # Mostrar solo 3 próximas
-        if parada.get('estado') != 'entregado':
-            texto += f"📍 {parada['nombre']}\n"
-            texto += f"   🏢 {parada['dependencia']}\n"
-            texto += f"   🏠 {parada['direccion'][:30]}...\n\n"
+    if len(ruta['paradas']) > 5:
+        texto += f"... y {len(ruta['paradas']) - 5} paradas más\n\n"
     
-    if len(ruta['paradas']) > 3:
-        texto += f"... y {len(ruta['paradas']) - 3} paradas más"
+    texto += "*🚀 Comandos útiles:*\n"
+    texto += "📍 /ubicacion - Enviar ubicación actual\n"
+    texto += "📦 /entregar - Registrar entrega completada\n" 
+    texto += "🚨 /incidente - Reportar problema\n"
+    texto += "📸 Envía foto directo para acuse\n"
+    texto += "📊 /estatus - Actualizar estado de entrega\n"
     
     return texto
 
-def registrar_entrega_sistema(ruta_id, user_name, user_id, persona_entregada, foto_id=None):
+def registrar_entrega_sistema(user_id, user_name, persona_entregada, foto_id=None, comentarios=""):
     """Registrar entrega en el sistema de archivos"""
     try:
-        timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+        if user_id not in RUTAS_ASIGNADAS:
+            return False
+            
+        ruta_id = RUTAS_ASIGNADAS[user_id]
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         
-        datos_entrega = {
-            'ruta_id': ruta_id,
-            'repartidor': user_name,
-            'repartidor_id': user_id,
-            'persona_entregada': persona_entregada,
-            'foto_acuse': f"fotos_acuses/{foto_id}.jpg" if foto_id else None,
-            'timestamp': timestamp,
-            'coords_entrega': 'Por definir'  # Se puede obtener de ubicación
-        }
-        
-        # Guardar en avances_ruta
-        archivo_avance = f"avances_ruta/entrega_{ruta_id}_{int(time.time())}.json"
-        with open(archivo_avance, 'w', encoding='utf-8') as f:
-            json.dump(datos_entrega, f, indent=2, ensure_ascii=False)
-        
-        print(f"✅ Entrega registrada: {user_name} → {persona_entregada} (Ruta {ruta_id})")
-        return True
+        # Buscar archivo de la ruta
+        for archivo in os.listdir('rutas_telegram'):
+            if f"Ruta_{ruta_id}_" in archivo:
+                with open(f'rutas_telegram/{archivo}', 'r', encoding='utf-8') as f:
+                    ruta_data = json.load(f)
+                
+                # Actualizar parada
+                for parada in ruta_data['paradas']:
+                    if persona_entregada.lower() in parada['nombre'].lower():
+                        parada['estado'] = 'entregado'
+                        parada['timestamp_entrega'] = timestamp
+                        parada['foto_acuse'] = f"fotos_acuses/{foto_id}.jpg" if foto_id else None
+                        parada['comentarios'] = comentarios
+                        break
+                
+                # Verificar si todas están entregadas
+                pendientes = [p for p in ruta_data['paradas'] if p.get('estado') != 'entregado']
+                if not pendientes:
+                    ruta_data['estado'] = 'completada'
+                    ruta_data['timestamp_completada'] = timestamp
+                
+                # Guardar cambios
+                with open(f'rutas_telegram/{archivo}', 'w', encoding='utf-8') as f:
+                    json.dump(ruta_data, f, indent=2, ensure_ascii=False)
+                
+                # Guardar avance
+                avance = {
+                    'ruta_id': ruta_id,
+                    'repartidor': user_name,
+                    'repartidor_id': user_id,
+                    'persona_entregada': persona_entregada,
+                    'foto_acuse': f"fotos_acuses/{foto_id}.jpg" if foto_id else None,
+                    'timestamp': timestamp,
+                    'comentarios': comentarios
+                }
+                
+                avance_file = f"avances_ruta/entrega_{ruta_id}_{int(time.time())}.json"
+                with open(avance_file, 'w', encoding='utf-8') as f:
+                    json.dump(avance, f, indent=2, ensure_ascii=False)
+                
+                print(f"✅ Entrega registrada: {user_name} → {persona_entregada} (Ruta {ruta_id})")
+                return True
+                
     except Exception as e:
         print(f"❌ Error registrando entrega: {e}")
-        return False
+    
+    return False
 
-# --- COMANDOS ACTUALIZADOS ---
+# =============================================================================
+# COMANDOS PRINCIPALES - ASIGNACIÓN AUTOMÁTICA
+# =============================================================================
 
-# 1. COMANDO START MEJORADO
 @bot.message_handler(commands=['start', 'hola'])
 def enviar_bienvenida(message):
     welcome_text = f"""
-🤖 *BOT DE RUTAS - PJCDMX* 🚚
+🤖 *BOT DE RUTAS AUTOMÁTICO - PJCDMX* 🚚
 
-¡Hola {message.from_user.first_name}! Soy MoniBot
+¡Hola {message.from_user.first_name}! Soy tu asistente de rutas automáticas.
 
-*Comandos disponibles:*
-/start - Mostrar esta ayuda
-/rutas - 🗺️ Ver mis rutas asignadas
-/incidente - 📝 Reportar incidente  
-/ubicacion - 📍 Enviar ubicación actual
-/foto - 📸 Enviar foto del incidente
-/atencionH - 👨‍💼 Comunicarse con persona
-/estatus - 📊 Actualizar estatus (con foto opcional)
+*🚀 COMANDOS PRINCIPALES:*
+/solicitar_ruta - 🗺️ Obtener ruta automáticamente
+/miruta - 📋 Ver mi ruta asignada
 /entregar - 📦 Registrar entrega completada
 
-¡Reporta en tiempo real!
+*📊 REPORTES Y SEGUIMIENTO:*
+/ubicacion - 📍 Enviar ubicación actual  
+/incidente - 🚨 Reportar incidente
+/foto - 📸 Enviar foto del incidente
+/estatus - 📈 Actualizar estado de entrega
+/atencionH - 👨‍💼 Soporte humano
+
+*¡El sistema asigna rutas automáticamente!*
     """
     bot.reply_to(message, welcome_text, parse_mode='Markdown')
     print(f"📨 Start: {message.from_user.first_name}")
 
-# 2. NUEVO COMANDO: RUTAS
-@bot.message_handler(commands=['rutas'])
-def mostrar_rutas(message):
+@bot.message_handler(commands=['solicitar_ruta'])
+def solicitar_ruta_automatica(message):
+    """Asignar ruta automáticamente al repartidor"""
+    try:
+        user_id = message.from_user.id
+        user_name = message.from_user.first_name
+        
+        print(f"🔄 Solicitud de ruta de {user_name} (ID: {user_id})")
+        
+        # Verificar si ya tiene ruta asignada
+        if user_id in RUTAS_ASIGNADAS:
+            bot.reply_to(message, 
+                        "📭 *Ya tienes una ruta asignada.*\n\n"
+                        "Usa /miruta para ver tu ruta actual.\n"
+                        "Si has completado tu ruta, contacta a soporte.",
+                        parse_mode='Markdown')
+            return
+        
+        # Recargar rutas disponibles
+        rutas_disponibles = cargar_rutas_disponibles()
+        
+        if rutas_disponibles == 0:
+            bot.reply_to(message, 
+                        "📭 *No hay rutas disponibles en este momento.*\n\n"
+                        "Todas las rutas han sido asignadas.\n"
+                        "Contacta a tu supervisor o intenta más tarde.",
+                        parse_mode='Markdown')
+            return
+        
+        # Asignar la primera ruta disponible
+        ruta_asignada = RUTAS_DISPONIBLES.pop(0)
+        ruta_id = ruta_asignada['ruta_id']
+        zona = ruta_asignada['zona']
+        
+        # Actualizar la ruta en archivo
+        archivo_ruta = f"rutas_telegram/Ruta_{ruta_id}_{zona}.json"
+        ruta_asignada['repartidor_asignado'] = f"user_{user_id}"
+        ruta_asignada['estado'] = 'asignada'
+        ruta_asignada['timestamp_asignacion'] = datetime.now().isoformat()
+        
+        # Guardar cambios
+        with open(archivo_ruta, 'w', encoding='utf-8') as f:
+            json.dump(ruta_asignada, f, indent=2, ensure_ascii=False)
+        
+        # Registrar asignación en memoria
+        RUTAS_ASIGNADAS[user_id] = ruta_id
+        
+        # Enviar ruta al repartidor
+        mensaje = formatear_ruta_para_repartidor(ruta_asignada)
+        
+        # Botón para Google Maps
+        markup = types.InlineKeyboardMarkup()
+        btn_maps = types.InlineKeyboardButton("🗺️ Abrir en Google Maps", url=ruta_asignada['google_maps_url'])
+        markup.add(btn_maps)
+        
+        bot.reply_to(message, mensaje, parse_mode='Markdown', reply_markup=markup)
+        print(f"✅ Ruta {ruta_id} asignada a {user_name}")
+        
+    except Exception as e:
+        error_msg = f"❌ Error asignando ruta: {str(e)}"
+        print(error_msg)
+        bot.reply_to(message, 
+                    "❌ *Error al asignar ruta.*\n\n"
+                    "Por favor, intenta nuevamente o contacta a soporte.",
+                    parse_mode='Markdown')
+
+@bot.message_handler(commands=['miruta'])
+def ver_mi_ruta(message):
+    """Ver la ruta asignada actual"""
     user_id = message.from_user.id
     user_name = message.from_user.first_name
     
-    rutas = obtener_rutas_usuario(user_id)
-    
-    if not rutas:
+    if user_id not in RUTAS_ASIGNADAS:
         bot.reply_to(message, 
-                    "📭 *No tienes rutas asignadas en este momento.*\n\n"
-                    "Las rutas se asignan desde el sistema central. "
-                    "Contacta a tu supervisor si crees que hay un error.",
+                    "📭 *No tienes una ruta asignada.*\n\n"
+                    "Usa /solicitar_ruta para obtener una ruta automáticamente.",
                     parse_mode='Markdown')
-        print(f"📭 Rutas: {user_name} - Sin rutas asignadas")
         return
     
+    ruta_id = RUTAS_ASIGNADAS[user_id]
+    
+    # Buscar la ruta en archivos
+    for archivo in os.listdir('rutas_telegram'):
+        if f"Ruta_{ruta_id}_" in archivo:
+            try:
+                with open(f'rutas_telegram/{archivo}', 'r', encoding='utf-8') as f:
+                    ruta = json.load(f)
+                
+                mensaje = formatear_ruta_para_repartidor(ruta)
+                markup = types.InlineKeyboardMarkup()
+                btn_maps = types.InlineKeyboardButton("🗺️ Abrir en Google Maps", url=ruta['google_maps_url'])
+                markup.add(btn_maps)
+                
+                bot.reply_to(message, mensaje, parse_mode='Markdown', reply_markup=markup)
+                return
+                
+            except Exception as e:
+                print(f"❌ Error leyendo ruta {archivo}: {e}")
+    
     bot.reply_to(message, 
-                f"🗺️ *TUS RUTAS ASIGNADAS*\n\n"
-                f"Tienes *{len(rutas)}* ruta(s) asignada(s).",
+                "❌ *No se pudo encontrar tu ruta asignada.*\n\n"
+                "Por favor, usa /solicitar_ruta para obtener una nueva ruta.",
                 parse_mode='Markdown')
+
+# =============================================================================
+# COMANDOS DE ADMINISTRADOR
+# =============================================================================
+
+@bot.message_handler(commands=['estado_rutas'])
+def estado_rutas(message):
+    """Ver estado de todas las rutas (solo admin)"""
+    if message.from_user.id not in ADMIN_IDS:
+        bot.reply_to(message, "❌ Solo administradores pueden usar este comando")
+        return
     
-    # Enviar cada ruta en un mensaje separado
-    for ruta in rutas:
-        texto_ruta = formatear_ruta_telegram(ruta)
-        bot.send_message(message.chat.id, texto_ruta, parse_mode='Markdown')
+    cargar_rutas_disponibles()
     
-    print(f"🗺️ Rutas mostradas: {user_name} - {len(rutas)} rutas")
+    total_rutas = 0
+    rutas_pendientes = 0
+    rutas_asignadas = 0
+    rutas_completadas = 0
+    
+    # Contar rutas por estado
+    if os.path.exists('rutas_telegram'):
+        for archivo in os.listdir('rutas_telegram'):
+            if archivo.endswith('.json'):
+                try:
+                    with open(f'rutas_telegram/{archivo}', 'r', encoding='utf-8') as f:
+                        ruta = json.load(f)
+                    
+                    total_rutas += 1
+                    estado = ruta.get('estado', 'desconocido')
+                    
+                    if estado == 'pendiente':
+                        rutas_pendientes += 1
+                    elif estado == 'asignada':
+                        rutas_asignadas += 1
+                    elif estado == 'completada':
+                        rutas_completadas += 1
+                        
+                except Exception as e:
+                    print(f"❌ Error leyendo {archivo}: {e}")
+    
+    mensaje = f"*📊 ESTADO DEL SISTEMA - RUTAS AUTOMÁTICAS*\n\n"
+    mensaje += f"*• Total rutas generadas:* {total_rutas}\n"
+    mensaje += f"*• ✅ Asignadas a repartidores:* {rutas_asignadas}\n"
+    mensaje += f"*• ⏳ Disponibles para asignar:* {rutas_pendientes}\n"
+    mensaje += f"*• 🏁 Completadas:* {rutas_completadas}\n\n"
+    mensaje += f"*• 👥 Repartidores activos:* {len(RUTAS_ASIGNADAS)}\n"
+    mensaje += f"*• 📁 Rutas en memoria:* {len(RUTAS_DISPONIBLES)}\n\n"
+    mensaje += "*Última actualización:* " + datetime.now().strftime("%H:%M:%S")
+    
+    bot.reply_to(message, mensaje, parse_mode='Markdown')
 
-# 3. NUEVO COMANDO: ENTREGAR
-@bot.message_handler(commands=['entregar'])
-def iniciar_entrega(message):
-    texto = """
-📦 *REGISTRAR ENTREGA COMPLETADA*
+@bot.message_handler(commands=['generar_rutas_ejemplo'])
+def generar_rutas_ejemplo(message):
+    """Generar rutas de ejemplo para pruebas (solo admin)"""
+    if message.from_user.id not in ADMIN_IDS:
+        return
+    
+    try:
+        bot.reply_to(message, "🔄 Generando rutas de ejemplo...")
+        
+        # Datos de ejemplo del Tribunal
+        rutas_ejemplo = [
+            {
+                'ruta_id': 1,
+                'zona': 'CENTRO',
+                'repartidor_asignado': None,
+                'google_maps_url': 'https://maps.google.com/maps/dir/19.4283717,-99.1430307/19.4326077,-99.1332081/19.4340000,-99.1350000/19.4355000,-99.1360000',
+                'paradas': [
+                    {
+                        'orden': 1,
+                        'nombre': 'LIC. CARLOS RODRÍGUEZ HERNÁNDEZ',
+                        'direccion': 'Av. Reforma 123, Edificio A, Piso 3, Cuauhtémoc, CDMX',
+                        'dependencia': 'SALA SUPERIOR',
+                        'coords': '19.4326077,-99.1332081',
+                        'estado': 'pendiente'
+                    },
+                    {
+                        'orden': 2,
+                        'nombre': 'DRA. MARÍA GARCÍA LÓPEZ',
+                        'direccion': 'Insurgentes Sur 456, Oficina 501, Cuauhtémoc, CDMX',
+                        'dependencia': 'SALA REGIONAL',
+                        'coords': '19.4340000,-99.1350000', 
+                        'estado': 'pendiente'
+                    }
+                ],
+                'estadisticas': {
+                    'total_paradas': 2,
+                    'distancia_km': 5.2,
+                    'tiempo_min': 18,
+                    'origen': 'TSJCDMX - Niños Héroes 150'
+                },
+                'estado': 'pendiente',
+                'timestamp_creacion': datetime.now().isoformat()
+            },
+            {
+                'ruta_id': 2,
+                'zona': 'SUR',
+                'repartidor_asignado': None,
+                'google_maps_url': 'https://maps.google.com/maps/dir/19.4283717,-99.1430307/19.3556000,-99.1623000/19.3600000,-99.1650000',
+                'paradas': [
+                    {
+                        'orden': 1,
+                        'nombre': 'MTRO. JAVIER DÍAZ MORALES',
+                        'direccion': 'Calzada de Tlalpan 789, Torre Judicial, Coyoacán, CDMX',
+                        'dependencia': 'UNIDAD DE NOTIFICACIONES',
+                        'coords': '19.3556000,-99.1623000',
+                        'estado': 'pendiente'
+                    },
+                    {
+                        'orden': 2,
+                        'nombre': 'LIC. ANA Martínez Sánchez',
+                        'direccion': 'Miguel Ángel de Quevedo 321, Local 2, Coyoacán, CDMX',
+                        'dependencia': 'ARCHIVO JUDICIAL',
+                        'coords': '19.3600000,-99.1650000',
+                        'estado': 'pendiente'
+                    }
+                ],
+                'estadisticas': {
+                    'total_paradas': 2,
+                    'distancia_km': 8.7,
+                    'tiempo_min': 25,
+                    'origen': 'TSJCDMX - Niños Héroes 150'
+                },
+                'estado': 'pendiente',
+                'timestamp_creacion': datetime.now().isoformat()
+            }
+        ]
+        
+        # Guardar rutas de ejemplo
+        for ruta in rutas_ejemplo:
+            archivo = f"rutas_telegram/Ruta_{ruta['ruta_id']}_{ruta['zona']}.json"
+            with open(archivo, 'w', encoding='utf-8') as f:
+                json.dump(ruta, f, indent=2, ensure_ascii=False)
+        
+        # Recargar disponibles
+        cargar_rutas_disponibles()
+        
+        bot.reply_to(message, 
+                    f"✅ *Rutas de ejemplo generadas!*\n\n"
+                    f"Se crearon {len(rutas_ejemplo)} rutas de prueba.\n"
+                    f"Ahora los repartidores pueden usar /solicitar_ruta\n\n"
+                    f"Usa /estado_rutas para ver el estado.",
+                    parse_mode='Markdown')
+        
+    except Exception as e:
+        bot.reply_to(message, f"❌ Error generando rutas: {str(e)}")
 
-Para registrar una entrega:
+# =============================================================================
+# TUS COMANDOS ORIGINALES (MANTENIDOS)
+# =============================================================================
 
-1. *Selecciona la ruta* (usa /rutas para verlas)
-2. *Envía el nombre completo* de la persona que recibió
-3. *Opcional:* Envía foto del acuse
-
-*Ejemplo:*
-`Carlos Rodríguez Hernández`
-
-💡 *Consejo:* Si envías foto, asegúrate de incluir el nombre en el pie de foto.
-    """
-    bot.reply_to(message, texto, parse_mode='Markdown')
-    print(f"📦 Entregar: {message.from_user.first_name}")
-
-# 4. COMANDO INCIDENTE (CON SERVICIO AL CLIENTE MEJORADO)
 @bot.message_handler(commands=['incidente'])
 def reportar_incidente(message):
     texto = """
@@ -211,7 +459,6 @@ Escribe tu reporte:
     bot.reply_to(message, texto, parse_mode='Markdown')
     print(f"🚨 Incidente: {message.from_user.first_name}")
 
-# 5. COMANDO UBICACIÓN (MANTENIDO)
 @bot.message_handler(commands=['ubicacion'])
 def solicitar_ubicacion(message):
     texto = """
@@ -230,7 +477,6 @@ Envía tu ubicación actual:
     bot.reply_to(message, texto, parse_mode='Markdown')
     print(f"📍 Ubicación: {message.from_user.first_name}")
 
-# 6. MANEJADOR DE UBICACIONES (MEJORADO)
 @bot.message_handler(content_types=['location'])
 def manejar_ubicacion(message):
     user = message.from_user.first_name
@@ -243,21 +489,13 @@ def manejar_ubicacion(message):
                   (user_id, user, 'ubicacion', f"{lat},{lon}"))
     conn.commit()
     
-    # También guardar para sistema de rutas si hay rutas activas
-    rutas = obtener_rutas_usuario(user_id)
-    if rutas:
-        # Podríamos asociar la ubicación con la ruta activa
-        pass
-    
     respuesta = (f"📍 *UBICACIÓN RECIBIDA* ¡Gracias {user}!\n\n"
                 f"*Coordenadas:* `{lat:.6f}, {lon:.6f}`\n"
                 f"*Guardado para:* Reportes y seguimiento de rutas")
     
     bot.reply_to(message, respuesta, parse_mode='Markdown')
     print(f"📍 Ubicación recibida: {user} - {lat},{lon}")
-    notificar_admin(f"📍 {user} envió ubicación: {lat},{lon}")
 
-# 7. COMANDO FOTO (MEJORADO PARA ACUSES)
 @bot.message_handler(commands=['foto'])
 def solicitar_foto(message):
     texto = """
@@ -279,7 +517,6 @@ Puedes enviar fotos para:
     bot.reply_to(message, texto, parse_mode='Markdown')
     print(f"📸 Foto: {message.from_user.first_name}")
 
-# 8. MANEJADOR DE FOTOS (MEJORADO)
 @bot.message_handler(content_types=['photo'])
 def manejar_foto(message):
     user = message.from_user.first_name
@@ -287,23 +524,25 @@ def manejar_foto(message):
     file_id = message.photo[-1].file_id
     caption = message.caption if message.caption else "Sin descripción"
     
-    # Determinar tipo de foto
+    # Determinar tipo de foto y procesar
     if any(word in caption.lower() for word in ['entregado', 'entregada', '✅', 'recibido']):
         tipo = 'foto_acuse'
-        # Intentar extraer nombre de persona
+        # Intentar extraer nombre de persona para registro automático
         persona_entregada = "Por determinar"
-        for word in caption.split():
-            if word.istitle() and len(word) > 3:
-                persona_entregada = word
+        palabras = caption.split()
+        for i, palabra in enumerate(palabras):
+            if palabra.lower() in ['a', 'para', 'entregado', 'entregada'] and i + 1 < len(palabras):
+                persona_entregada = " ".join(palabras[i+1:])
                 break
-                
-        # Registrar en sistema de rutas
-        rutas = obtener_rutas_usuario(user_id)
-        if rutas:
-            registrar_entrega_sistema(rutas[0]['ruta_id'], user, user_id, persona_entregada, file_id)
-            respuesta = f"📦 *ACUSE CON FOTO REGISTRADO* ¡Gracias {user}!\nEntrega a *{persona_entregada}* registrada en el sistema."
+        
+        # Registrar en sistema automáticamente
+        if user_id in RUTAS_ASIGNADAS:
+            if registrar_entrega_sistema(user_id, user, persona_entregada, file_id, caption):
+                respuesta = f"📦 *ACUSE CON FOTO REGISTRADO* ¡Gracias {user}!\nEntrega a *{persona_entregada}* registrada automáticamente."
+            else:
+                respuesta = f"📸 *FOTO DE ACUSE RECIBIDA* ¡Gracias {user}!\n*Persona:* {persona_entregada}"
         else:
-            respuesta = f"📸 *FOTO DE ACUSE RECIBIDA* ¡Gracias {user}!\n*Nota:* No tienes rutas activas asignadas."
+            respuesta = f"📸 *FOTO DE ACUSE RECIBIDA* ¡Gracias {user}!\n*Nota:* No tienes ruta activa asignada."
             
     elif any(word in caption.lower() for word in ['retrasado', 'problema', '⏳', '🚨']):
         tipo = 'foto_estatus'
@@ -319,9 +558,7 @@ def manejar_foto(message):
     
     bot.reply_to(message, respuesta, parse_mode='Markdown')
     print(f"📸 Foto recibida: {user} - {caption} - Tipo: {tipo}")
-    notificar_admin(f"📸 {user} envió foto ({tipo}): {caption}")
 
-# 9. COMANDO ATENCIÓN HUMANA (MANTENIDO)
 @bot.message_handler(commands=['atencionH', 'humano', 'soporte'])
 def solicitar_atencion_humana(message):
     user = message.from_user.first_name
@@ -342,9 +579,7 @@ _Proporciona este ID al contactar_
     """
     bot.reply_to(message, texto, parse_mode='Markdown')
     print(f"🚨 AtenciónH: {user} (ID: {user_id})")
-    notificar_admin(f"🚨 {user} (ID: {user_id}) solicitó ATENCIÓN HUMANA")
 
-# 10. COMANDO ESTATUS MEJORADO
 @bot.message_handler(commands=['estatus'])
 def actualizar_estatus(message):
     texto = """
@@ -365,7 +600,27 @@ Opciones disponibles:
     bot.reply_to(message, texto, parse_mode='Markdown')
     print(f"📊 Estatus: {message.from_user.first_name}")
 
-# 11. MANEJADOR GENERAL DE TEXTO MEJORADO
+@bot.message_handler(commands=['entregar'])
+def iniciar_entrega(message):
+    texto = """
+📦 *REGISTRAR ENTREGA COMPLETADA*
+
+Para registrar una entrega:
+
+1. *Envía el nombre completo* de la persona que recibió
+2. *Opcional:* Envía foto del acuse
+
+*Ejemplos:*
+`Carlos Rodríguez Hernández`
+`Entregado a María García López`
+
+💡 *Consejo:* Si envías foto, asegúrate de incluir el nombre en el pie de foto.
+
+*La entrega se registrará automáticamente en tu ruta actual.*
+    """
+    bot.reply_to(message, texto, parse_mode='Markdown')
+    print(f"📦 Entregar: {message.from_user.first_name}")
+
 @bot.message_handler(func=lambda message: True, content_types=['text'])
 def manejar_texto_general(message):
     if message.text.startswith('/'):
@@ -379,20 +634,26 @@ def manejar_texto_general(message):
     if any(word in texto.lower() for word in ['entregado', 'entregada', 'recibido']) and len(texto.split()) > 2:
         # Probablemente es "Entregado a [Nombre]"
         partes = texto.split()
-        if 'a' in partes or 'a:' in [p.lower() for p in partes]:
-            # Es un registro de entrega
-            rutas = obtener_rutas_usuario(user_id)
-            if rutas:
-                persona_entregada = " ".join(partes[partes.index('a')+1:]) if 'a' in partes else texto
-                registrar_entrega_sistema(rutas[0]['ruta_id'], user, user_id, persona_entregada)
+        persona_entregada = texto
+        
+        # Intentar extraer nombre después de "a" o "para"
+        for i, palabra in enumerate(partes):
+            if palabra.lower() in ['a', 'para', 'entregado', 'entregada'] and i + 1 < len(partes):
+                persona_entregada = " ".join(partes[i+1:])
+                break
+        
+        # Registrar en sistema si tiene ruta asignada
+        if user_id in RUTAS_ASIGNADAS:
+            if registrar_entrega_sistema(user_id, user, persona_entregada, None, texto):
                 respuesta = f"📦 *ENTREGA REGISTRADA* ¡Gracias {user}!\nEntrega a *{persona_entregada}* registrada en el sistema."
             else:
-                respuesta = f"✅ *REPORTE RECIBIDO* ¡Gracias {user}!\n*Nota:* No tienes rutas activas asignadas."
-            
-            bot.reply_to(message, respuesta, parse_mode='Markdown')
-            print(f"📦 Entrega registrada: {user} - {persona_entregada}")
-            notificar_admin(f"📦 {user} registró entrega a: {persona_entregada}")
-            return
+                respuesta = f"✅ *REPORTE RECIBIDO* ¡Gracias {user}!\nRegistrado: \"{texto}\""
+        else:
+            respuesta = f"✅ *REPORTE RECIBIDO* ¡Gracias {user}!\n*Nota:* No tienes ruta activa asignada."
+        
+        bot.reply_to(message, respuesta, parse_mode='Markdown')
+        print(f"📦 Entrega registrada: {user} - {persona_entregada}")
+        return
     
     # Detectar estatus automáticamente (lógica original)
     estatus_keywords = {
@@ -407,21 +668,30 @@ def manejar_texto_general(message):
             respuesta = f"📊 *ESTATUS ACTUALIZADO* ¡{user}! Estatus: *{estatus}*\n\n💡 *Tip:* También puedes enviar FOTO como evidencia con el estatus en el pie de foto"
             bot.reply_to(message, respuesta, parse_mode='Markdown')
             print(f"📊 Estatus actualizado: {user} - {estatus}")
-            notificar_admin(f"📊 {user} actualizó estatus a: {estatus}")
             return
     
     # Si no es estatus ni entrega, es reporte normal
     respuesta = f"✅ *REPORTE RECIBIDO* ¡Gracias {user}! Registrado: \"{texto}\""
     bot.reply_to(message, respuesta, parse_mode='Markdown')
     print(f"📝 Reporte: {user} - {texto}")
-    notificar_admin(f"📝 {user} reportó: {texto}")
 
-# --- INICIAR BOT ---
+# =============================================================================
+# INICIALIZACIÓN Y EJECUCIÓN
+# =============================================================================
+
+def inicializar_sistema():
+    """Inicializar el sistema al arrancar"""
+    print("🔄 Inicializando sistema de rutas automáticas...")
+    cargar_rutas_disponibles()
+    print(f"✅ Sistema listo. Rutas disponibles: {len(RUTAS_DISPONIBLES)}")
+    print("🤖 Bot listo para recibir solicitudes de rutas")
+
 if __name__ == "__main__":
-    print("\n🎯 MONIBOT PJCDMX CON SISTEMA DE RUTAS - LISTO AL 100%")
-    print("📱 Comandos: /start, /rutas, /incidente, /ubicacion, /foto, /atencionH, /estatus, /entregar")
-    print("📁 Sistema de rutas integrado")
-    print("🚀 Iniciando bot en Railway...")
+    print("\n🎯 SISTEMA AUTOMÁTICO DE RUTAS PJCDMX - 100% OPERATIVO")
+    print("📱 Comandos: /solicitar_ruta, /miruta, /entregar, /estado_rutas")
+    print("🚀 Inicializando en Railway...")
+    
+    inicializar_sistema()
     
     try:
         bot.polling(none_stop=True, interval=1)
