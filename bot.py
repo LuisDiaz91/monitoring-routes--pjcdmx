@@ -686,6 +686,60 @@ def inicializar_sistema():
     print(f"✅ Sistema listo. Rutas disponibles: {len(RUTAS_DISPONIBLES)}")
     print("🤖 Bot listo para recibir solicitudes de rutas")
 
+# =============================================================================
+# API PARA RECIBIR RUTAS DEL PROGRAMA GENERADOR
+# =============================================================================
+from flask import Flask, request, jsonify
+import threading
+
+app = Flask(__name__)
+
+@app.route('/api/health', methods=['GET'])
+def health_check():
+    return jsonify({"status": "ok", "service": "bot_rutas_pjcdmx"})
+
+@app.route('/api/rutas', methods=['POST'])
+def recibir_rutas_desde_programa():
+    """Endpoint para que el programa generador envíe rutas reales"""
+    try:
+        datos_ruta = request.json
+        
+        if not datos_ruta:
+            return jsonify({"error": "Datos vacíos"}), 400
+        
+        ruta_id = datos_ruta.get('ruta_id', 1)
+        zona = datos_ruta.get('zona', 'GENERAL')
+        
+        # Guardar la ruta en el sistema
+        archivo_ruta = f"rutas_telegram/Ruta_{ruta_id}_{zona}.json"
+        
+        with open(archivo_ruta, 'w', encoding='utf-8') as f:
+            json.dump(datos_ruta, f, indent=2, ensure_ascii=False)
+        
+        # Recargar rutas disponibles
+        cargar_rutas_disponibles()
+        
+        print(f"✅ Ruta {ruta_id} recibida via API y guardada")
+        
+        return jsonify({
+            "status": "success", 
+            "ruta_id": ruta_id,
+            "archivo": archivo_ruta,
+            "rutas_disponibles": len(RUTAS_DISPONIBLES)
+        })
+        
+    except Exception as e:
+        print(f"❌ Error en API /api/rutas: {e}")
+        return jsonify({"error": str(e)}), 500
+
+def ejecutar_api():
+    """Ejecutar Flask en segundo plano"""
+    app.run(host='0.0.0.0', port=8000, debug=False, use_reloader=False)
+
+# Iniciar API en segundo plano al arrancar el bot
+threading.Thread(target=ejecutar_api, daemon=True).start()
+print("🌐 API Flask iniciada en puerto 8000")
+
 if __name__ == "__main__":
     print("\n🎯 SISTEMA AUTOMÁTICO DE RUTAS PJCDMX - 100% OPERATIVO")
     print("📱 Comandos: /solicitar_ruta, /miruta, /entregar, /estado_rutas")
