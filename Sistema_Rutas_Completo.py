@@ -17,7 +17,47 @@ import subprocess
 import shutil
 
 # =============================================================================
-# CLASE GESTOR TELEGRAM (NUEVA)
+# CLASE CONEXIÓN CON BOT RAILWAY
+# =============================================================================
+class ConexionBotRailway:
+    def __init__(self, url_base):
+        self.url_base = url_base
+        self.timeout = 30
+    
+    def enviar_ruta_bot(self, ruta_data):
+        """Enviar ruta generada al bot en Railway"""
+        try:
+            url = f"{self.url_base}/api/rutas"
+            
+            response = requests.post(
+                url,
+                json=ruta_data,
+                timeout=self.timeout,
+                headers={'Content-Type': 'application/json'}
+            )
+            
+            if response.status_code == 200:
+                resultado = response.json()
+                print(f"✅ Ruta {ruta_data['ruta_id']} enviada al bot: {resultado}")
+                return True
+            else:
+                print(f"❌ Error enviando ruta: {response.status_code} - {response.text}")
+                return False
+                
+        except Exception as e:
+            print(f"❌ Error de conexión con bot: {e}")
+            return False
+    
+    def verificar_conexion(self):
+        """Verificar que el bot está disponible"""
+        try:
+            response = requests.get(f"{self.url_base}/api/health", timeout=10)
+            return response.status_code == 200
+        except:
+            return False
+
+# =============================================================================
+# CLASE GESTOR TELEGRAM
 # =============================================================================
 class GestorTelegram:
     def __init__(self, gui_principal):
@@ -443,7 +483,29 @@ class CoreRouteGenerator:
         except Exception as e:
             self._log(f"❌ Error guardando datos Telegram: {str(e)}")
         
-        # 4. RETORNAR DATOS ORIGINALES + NUEVOS
+        # =========================================================================
+        # 🆕 NUEVO: ENVIAR RUTA AL BOT EN RAILWAY
+        # =========================================================================
+        
+        # 4. ENVIAR RUTA AL BOT EN RAILWAY
+        try:
+            # URL de tu bot en Railway (⚠️ CAMBIA ESTA URL por la real)
+            RAILWAY_URL = "https://monitoring-routes--pjcdmx.up.railway.app"
+            
+            conexion = ConexionBotRailway(RAILWAY_URL)
+            
+            if conexion.verificar_conexion():
+                if conexion.enviar_ruta_bot(ruta_telegram):
+                    self._log(f"📱 Ruta {ruta_id} enviada al bot exitosamente")
+                else:
+                    self._log("⚠️ Ruta generada pero no se pudo enviar al bot")
+            else:
+                self._log("❌ No se pudo conectar con el bot en Railway")
+                
+        except Exception as e:
+            self._log(f"❌ Error enviando al bot: {str(e)}")
+        
+        # 5. RETORNAR DATOS ORIGINALES + NUEVOS
         return {
             'ruta_id': ruta_id,
             'zona': zona,
@@ -452,8 +514,8 @@ class CoreRouteGenerator:
             'tiempo': round(tiempo),
             'excel': excel_file,
             'mapa': mapa_file,
-            'telegram_data': ruta_telegram,  # 🆕 NUEVO
-            'telegram_file': telegram_file   # 🆕 NUEVO
+            'telegram_data': ruta_telegram,
+            'telegram_file': telegram_file
         }
 
     def generate_routes(self):
@@ -574,7 +636,46 @@ class SistemaRutasGUI:
         self.procesando = False
         self.columnas_seleccionadas = None
         self.gestor_telegram = GestorTelegram(self)  # 🆕 NUEVO
+        
+        # 🆕 NUEVO: Intentar cargar Excel automáticamente al iniciar
         self.setup_ui()
+        self.root.after(1000, self.cargar_excel_desde_github)
+
+    def cargar_excel_desde_github(self):
+        """Cargar automáticamente el Excel de GitHub"""
+        try:
+            # Ruta donde está tu Excel en GitHub
+            excel_github = "Alcaldías.xlsx"  # ⚠️ Ajusta el nombre si es diferente
+            
+            if os.path.exists(excel_github):
+                self.archivo_excel = excel_github
+                df_completo = pd.read_excel(excel_github)
+                
+                self.file_label.config(text=excel_github, foreground='green')
+                self.log(f"✅ Excel cargado desde GitHub: {excel_github}")
+                self.log(f"📊 Registros totales: {len(df_completo)}")
+                
+                self.df = df_completo
+                
+                # Detección automática de columnas
+                col_direccion = self._detectar_columna_direccion(df_completo)
+                col_nombre = self._detectar_columna_nombre(df_completo) 
+                col_adscripcion = self._detectar_columna_adscripcion(df_completo)
+                
+                self.columnas_seleccionadas = {
+                    'direccion': col_direccion,
+                    'nombre': col_nombre,
+                    'adscripcion': col_adscripcion
+                }
+                
+                self.btn_generar.config(state='normal')
+                self.log("🎉 ¡Excel listo para generar rutas y enviar al bot!")
+                
+            else:
+                self.log("❌ No se encuentra el Excel de GitHub")
+                
+        except Exception as e:
+            self.log(f"❌ ERROR cargando Excel: {str(e)}")
 
     def _filtrar_filas_formato(self, df):
         """
