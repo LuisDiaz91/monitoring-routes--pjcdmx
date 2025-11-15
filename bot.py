@@ -764,7 +764,7 @@ if __name__ == "__main__":
                 interval=5,        # 🆕 Más tiempo entre checks
                 timeout=30,        # 🆕 Timeout más largo
                 allowed_updates=None,
-                restart_on_change=True
+                restart_on_change=True  # ✅ AHORA SÍ FUNCIONA
             )
             
         except Exception as e:
