@@ -627,7 +627,10 @@ class SistemaRutasGUI:
         self.root.title("Sistema Rutas PRO Ultra HD")
         self.root.geometry("1000x750")
         self.root.configure(bg='#f0f0f0')
-        self.api_key = ""
+        
+        # 🆕 NUEVO: API Key automática AQUÍ
+        self.api_key = "AIzaSyBeUr2C3SDkwY7zIrYcB6agDni9XDlWrFY"
+        
         self.origen_coords = "19.4283717,-99.1430307"
         self.origen_name = "TSJCDMX - Niños Héroes 150"
         self.max_stops = 8
@@ -635,47 +638,56 @@ class SistemaRutasGUI:
         self.df = None
         self.procesando = False
         self.columnas_seleccionadas = None
-        self.gestor_telegram = GestorTelegram(self)  # 🆕 NUEVO
+        self.gestor_telegram = GestorTelegram(self)
         
-        # 🆕 NUEVO: Intentar cargar Excel automáticamente al iniciar
         self.setup_ui()
+        
+        # 🆕 NUEVO: Solo UNA llamada aquí
         self.root.after(1000, self.cargar_excel_desde_github)
-
+    
     def cargar_excel_desde_github(self):
-        """Cargar automáticamente el Excel de GitHub"""
-        try:
-            # Ruta donde está tu Excel en GitHub
-            excel_github = "Alcaldías.xlsx"  # ⚠️ Ajusta el nombre si es diferente
+    """Cargar automáticamente el Excel de GitHub y configurar API"""
+    try:
+        # 1. 🆕 CONFIGURAR API KEY EN LA INTERFAZ
+        self.api_entry.delete(0, tk.END)
+        self.api_entry.insert(0, self.api_key)
+        self.log("✅ API Key de Google Maps configurada automáticamente")
+        self.log("🗺️ Sistema listo para geocodificar direcciones")
+        
+        # 2. CARGAR EXCEL AUTOMÁTICAMENTE
+        excel_github = "Alcaldías.xlsx"
+        
+        if os.path.exists(excel_github):
+            self.archivo_excel = excel_github
+            df_completo = pd.read_excel(excel_github)
             
-            if os.path.exists(excel_github):
-                self.archivo_excel = excel_github
-                df_completo = pd.read_excel(excel_github)
-                
-                self.file_label.config(text=excel_github, foreground='green')
-                self.log(f"✅ Excel cargado desde GitHub: {excel_github}")
-                self.log(f"📊 Registros totales: {len(df_completo)}")
-                
-                self.df = df_completo
-                
-                # Detección automática de columnas
-                col_direccion = self._detectar_columna_direccion(df_completo)
-                col_nombre = self._detectar_columna_nombre(df_completo) 
-                col_adscripcion = self._detectar_columna_adscripcion(df_completo)
-                
-                self.columnas_seleccionadas = {
-                    'direccion': col_direccion,
-                    'nombre': col_nombre,
-                    'adscripcion': col_adscripcion
-                }
-                
-                self.btn_generar.config(state='normal')
-                self.log("🎉 ¡Excel listo para generar rutas y enviar al bot!")
-                
-            else:
-                self.log("❌ No se encuentra el Excel de GitHub")
-                
-        except Exception as e:
-            self.log(f"❌ ERROR cargando Excel: {str(e)}")
+            self.file_label.config(text=excel_github, foreground='green')
+            self.log(f"✅ Excel cargado automáticamente: {excel_github}")
+            self.log(f"📊 Registros totales: {len(df_completo)}")
+            
+            self.df = df_completo
+            
+            # Detección automática de columnas
+            col_direccion = self._detectar_columna_direccion(df_completo)
+            col_nombre = self._detectar_columna_nombre(df_completo) 
+            col_adscripcion = self._detectar_columna_adscripcion(df_completo)
+            
+            self.columnas_seleccionadas = {
+                'direccion': col_direccion,
+                'nombre': col_nombre,
+                'adscripcion': col_adscripcion
+            }
+            
+            self.btn_generar.config(state='normal')
+            self.log("🎉 ¡Sistema completamente listo!")
+            self.log("💡 Haz clic en 'GENERAR RUTAS OPTIMIZADAS'")
+            
+        else:
+            self.log("📝 Excel no encontrado automáticamente")
+            self.log("💡 Usa el botón 'Examinar' para cargar tu Excel manualmente")
+            
+    except Exception as e:
+        self.log(f"❌ ERROR en carga automática: {str(e)}")
 
     def _filtrar_filas_formato(self, df):
         """
