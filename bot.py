@@ -731,15 +731,41 @@ def recibir_rutas_desde_programa():
     except Exception as e:
         print(f"❌ Error en API /api/rutas: {e}")
         return jsonify({"error": str(e)}), 500
+        
+# =============================================================================
+# CONFIGURACIÓN WEBHOOK PARA RAILWAY
+# =============================================================================
 
-def ejecutar_api():
-    """Ejecutar Flask en segundo plano"""
-    app.run(host='0.0.0.0', port=8000, debug=False, use_reloader=False)
+@app.route('/webhook', methods=['POST'])
+def webhook():
+    if request.headers.get('content-type') == 'application/json':
+        json_string = request.get_data().decode('utf-8')
+        update = telebot.types.Update.de_json(json_string)
+        bot.process_new_updates([update])
+        return ''
+    return 'OK'
 
-# Iniciar API en segundo plano al arrancar el bot
-threading.Thread(target=ejecutar_api, daemon=True).start()
-print("🌐 API Flask iniciada en puerto 8000")
+@app.route('/')
+def index():
+    return "🤖 Bot PJCDMX - Sistema de Rutas Automáticas 🚚"
 
+def set_webhook():
+    """Configurar webhook en Railway"""
+    try:
+        # Obtener la URL de Railway automáticamente
+        railway_url = os.environ.get('RAILWAY_STATIC_URL', f"https://{os.environ.get('RAILWAY_SERVICE_NAME', 'monitoring-routes-pjcdmx')}.up.railway.app")
+        webhook_url = f"{railway_url}/webhook"
+        
+        # Remover webhook anterior y configurar nuevo
+        bot.remove_webhook()
+        time.sleep(1)
+        bot.set_webhook(url=webhook_url)
+        
+        print(f"✅ Webhook configurado: {webhook_url}")
+        return True
+    except Exception as e:
+        print(f"❌ Error configurando webhook: {e}")
+        return False
 # =============================================================================
 # CONFIGURACIÓN DE EJECUCIÓN MEJORADA - WEBHOOK
 # =============================================================================
