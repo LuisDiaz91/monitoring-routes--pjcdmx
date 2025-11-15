@@ -741,7 +741,7 @@ threading.Thread(target=ejecutar_api, daemon=True).start()
 print("🌐 API Flask iniciada en puerto 8000")
 
 # =============================================================================
-# CONFIGURACIÓN DE EJECUCIÓN MEJORADA
+# CONFIGURACIÓN DE EJECUCIÓN MEJORADA - WEBHOOK
 # =============================================================================
 
 if __name__ == "__main__":
@@ -751,32 +751,17 @@ if __name__ == "__main__":
     
     inicializar_sistema()
     
-    # 🆕 NUEVO: Polling mejorado para Railway
-    max_retries = 5
-    retry_count = 0
-    
-    while retry_count < max_retries:
+    # 🆕 USAR WEBHOOK EN LUGAR DE POLLING
+    if set_webhook():
+        print("✅ Bot configurado con Webhook - Listo para recibir mensajes")
+        print("🌐 Servidor Flask ejecutándose...")
+        
+        # Mantener el servidor corriendo
+        app.run(host='0.0.0.0', port=8000, debug=False)
+    else:
+        print("❌ Falló la configuración del webhook, usando polling...")
+        # Fallback a polling
         try:
-            print(f"🔄 Intentando conectar con Telegram (intento {retry_count + 1}/{max_retries})...")
-            
-            bot.polling(
-                none_stop=True,
-                interval=5,        # 🆕 Más tiempo entre checks
-                timeout=30,        # 🆕 Timeout más largo
-                allowed_updates=None,
-                restart_on_change=True  # ✅ AHORA SÍ FUNCIONA
-            )
-            
+            bot.polling(none_stop=True, interval=3, timeout=30)
         except Exception as e:
-            retry_count += 1
-            print(f"❌ Error en intento {retry_count}: {e}")
-            
-            if retry_count < max_retries:
-                wait_time = 10 * retry_count  # Espera progresiva
-                print(f"⏳ Reintentando en {wait_time} segundos...")
-                time.sleep(wait_time)
-            else:
-                print("💥 Máximo de reintentos alcanzado. El bot se detiene.")
-                break
-    
-    print("🤖 Bot finalizado.")
+            print(f"❌ Error en polling: {e}")
