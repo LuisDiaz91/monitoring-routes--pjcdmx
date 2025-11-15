@@ -7,6 +7,8 @@ import json
 import pandas as pd
 from telebot import types
 from datetime import datetime
+from flask import Flask, request, jsonify
+import threading
 
 print("🚀 INICIANDO BOT COMPLETO PJCDMX - SISTEMA AUTOMÁTICO DE RUTAS...")
 
@@ -436,7 +438,7 @@ def generar_rutas_ejemplo(message):
         bot.reply_to(message, f"❌ Error generando rutas: {str(e)}")
 
 # =============================================================================
-# TUS COMANDOS ORIGINALES (MANTENIDOS)
+# COMANDOS ORIGINALES (MANTENIDOS)
 # =============================================================================
 
 @bot.message_handler(commands=['incidente'])
@@ -689,8 +691,6 @@ def inicializar_sistema():
 # =============================================================================
 # API PARA RECIBIR RUTAS DEL PROGRAMA GENERADOR
 # =============================================================================
-from flask import Flask, request, jsonify
-import threading
 
 app = Flask(__name__)
 
@@ -740,6 +740,10 @@ def ejecutar_api():
 threading.Thread(target=ejecutar_api, daemon=True).start()
 print("🌐 API Flask iniciada en puerto 8000")
 
+# =============================================================================
+# CONFIGURACIÓN DE EJECUCIÓN MEJORADA
+# =============================================================================
+
 if __name__ == "__main__":
     print("\n🎯 SISTEMA AUTOMÁTICO DE RUTAS PJCDMX - 100% OPERATIVO")
     print("📱 Comandos: /solicitar_ruta, /miruta, /entregar, /estado_rutas")
@@ -747,7 +751,32 @@ if __name__ == "__main__":
     
     inicializar_sistema()
     
-    try:
-        bot.polling(none_stop=True, interval=1)
-    except Exception as e:
-        print(f"❌ Error: {e}")
+    # 🆕 NUEVO: Polling mejorado para Railway
+    max_retries = 5
+    retry_count = 0
+    
+    while retry_count < max_retries:
+        try:
+            print(f"🔄 Intentando conectar con Telegram (intento {retry_count + 1}/{max_retries})...")
+            
+            bot.polling(
+                none_stop=True,
+                interval=5,        # 🆕 Más tiempo entre checks
+                timeout=30,        # 🆕 Timeout más largo
+                allowed_updates=None,
+                restart_on_change=True
+            )
+            
+        except Exception as e:
+            retry_count += 1
+            print(f"❌ Error en intento {retry_count}: {e}")
+            
+            if retry_count < max_retries:
+                wait_time = 10 * retry_count  # Espera progresiva
+                print(f"⏳ Reintentando en {wait_time} segundos...")
+                time.sleep(wait_time)
+            else:
+                print("💥 Máximo de reintentos alcanzado. El bot se detiene.")
+                break
+    
+    print("🤖 Bot finalizado.")
