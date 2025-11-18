@@ -767,7 +767,7 @@ def set_webhook():
         print(f"❌ Error configurando webhook: {e}")
         return False
 # =============================================================================
-# CONFIGURACIÓN DE EJECUCIÓN MEJORADA - WEBHOOK
+# CONFIGURACIÓN DE EJECUCIÓN MEJORADA - TODO INTEGRADO
 # =============================================================================
 
 if __name__ == "__main__":
@@ -777,16 +777,15 @@ if __name__ == "__main__":
     
     inicializar_sistema()
     
-    # 🆕 USAR WEBHOOK EN LUGAR DE POLLING
+    # 🆕 CONFIGURAR WEBHOOK PRIMERO
     if set_webhook():
         print("✅ Bot configurado con Webhook - Listo para recibir mensajes")
-        print("🌐 Servidor Flask ejecutándose...")
+        print("🌐 Servidor Flask ejecutándose con API y Webhook...")
         
-        # Mantener el servidor corriendo
-        app.run(host='0.0.0.0', port=8000, debug=False)
+        # 🆕 CORRECCIÓN: Un solo servidor Flask que maneje TODO
+        app.run(host='0.0.0.0', port=8000, debug=False, use_reloader=False)
     else:
-        print("❌ Falló la configuración del webhook, usando polling...")
-        # Fallback a polling
+        print("❌ Falló webhook, usando polling...")
         try:
             bot.polling(none_stop=True, interval=3, timeout=30)
         except Exception as e:
