@@ -732,19 +732,19 @@ def recibir_rutas_desde_programa():
         print(f"❌ Error en API /api/rutas: {e}")
         return jsonify({"error": str(e)}), 500
         
-# =============================================================================
+# ===============================================# =============================================================================
 # CONFIGURACIÓN WEBHOOK PARA RAILWAY
 # =============================================================================
 
-@app.route('/webhook', methods=['POST'])
+@app.route('/webhook', methods=['POST', 'GET'])
 def webhook():
-    if request.headers.get('content-type') == 'application/json':
-        json_string = request.get_data().decode('utf-8')
-        update = telebot.types.Update.de_json(json_string)
-        bot.process_new_updates([update])
-        return ''
-    return 'OK'
-
+    if request.method == 'POST':
+        if request.headers.get('content-type') == 'application/json':
+            json_string = request.get_data().decode('utf-8')
+            update = telebot.types.Update.de_json(json_string)
+            bot.process_new_updates([update])
+            return 'OK', 200
+    return 'Hello! Bot is running!', 200
 @app.route('/')
 def index():
     return "🤖 Bot PJCDMX - Sistema de Rutas Automáticas 🚚"
