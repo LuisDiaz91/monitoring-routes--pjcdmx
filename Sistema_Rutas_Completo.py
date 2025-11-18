@@ -490,7 +490,7 @@ class CoreRouteGenerator:
         # 4. ENVIAR RUTA AL BOT EN RAILWAY
         try:
             # URL de tu bot en Railway (⚠️ CAMBIA ESTA URL por la real)
-            RAILWAY_URL = "RAILWAY_URL = "https://monitoring-routes--pjcdmx.up.railway.app"
+           RAILWAY_URL = "https://monitoring-routes-pjcdmx.up.railway.app"
             
             conexion = ConexionBotRailway(RAILWAY_URL)
             
