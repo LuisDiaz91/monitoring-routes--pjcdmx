@@ -10,6 +10,9 @@ from datetime import datetime
 from flask import Flask, request, jsonify
 import threading
 
+# 🆕 AGREGA ESTA LÍNEA CRÍTICA
+app = Flask(__name__)
+
 print("🚀 INICIANDO BOT COMPLETO PJCDMX - SISTEMA AUTOMÁTICO DE RUTAS...")
 
 # CONFIGURACIÓN SEGURA
