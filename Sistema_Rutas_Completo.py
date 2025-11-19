@@ -483,6 +483,7 @@ class CoreRouteGenerator:
         except Exception as e:
             self._log(f"❌ Error guardando datos Telegram: {str(e)}")
      # =========================================================================
+# =========================================================================
 # 🆕 NUEVO: ENVIAR RUTA AL BOT EN RAILWAY
 # =========================================================================
 
@@ -503,19 +504,19 @@ try:
         
 except Exception as e:
     self._log(f"❌ Error enviando al bot: {str(e)}")
-        
-        # 5. RETORNAR DATOS ORIGINALES + NUEVOS
-        return {
-            'ruta_id': ruta_id,
-            'zona': zona,
-            'paradas': len(filas_opt),
-            'distancia': round(dist, 1),
-            'tiempo': round(tiempo),
-            'excel': excel_file,
-            'mapa': mapa_file,
-            'telegram_data': ruta_telegram,
-            'telegram_file': telegram_file
-        }
+
+# 5. RETORNAR DATOS ORIGINALES + NUEVOS (FUERA del try/except)
+return {
+    'ruta_id': ruta_id,
+    'zona': zona,
+    'paradas': len(filas_opt),
+    'distancia': round(dist, 1),
+    'tiempo': round(tiempo),
+    'excel': excel_file,
+    'mapa': mapa_file,
+    'telegram_data': ruta_telegram,
+    'telegram_file': telegram_file
+}
 
     def generate_routes(self):
         self._log("Starting Core Route Generation Process")
