@@ -471,7 +471,7 @@ class CoreRouteGenerator:
             'fotos_acuses': [],  # Se llenará con las fotos del bot
             'timestamp_creacion': datetime.now().isoformat(),
             'excel_original': excel_file,  # 🆕 NUEVO - Para actualizar después
-            'indices_originales': indices.tolist()  # 🆕 NUEVO - Para mapear filas
+            'indices_originales': indices # 🆕 NUEVO - Para mapear filas
         }
         
         # 3. GUARDAR ARCHIVO JSON PARA TELEGRAM
