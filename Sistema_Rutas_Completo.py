@@ -482,41 +482,42 @@ class CoreRouteGenerator:
             self._log(f"📱 Datos para Telegram generados: {telegram_file}")
         except Exception as e:
             self._log(f"❌ Error guardando datos Telegram: {str(e)}")
-     # =========================================================================
-# =========================================================================
-# 🆕 NUEVO: ENVIAR RUTA AL BOT EN RAILWAY
-# =========================================================================
-
-# 4. ENVIAR RUTA AL BOT EN RAILWAY
-try:
-    # URL de tu bot en Railway
-    RAILWAY_URL = "https://monitoring-routes-pjcdmx-production.up.railway.app"
-    
-    conexion = ConexionBotRailway(RAILWAY_URL)
-    
-    if conexion.verificar_conexion():
-        if conexion.enviar_ruta_bot(ruta_telegram):
-            self._log(f"📱 Ruta {ruta_id} enviada al bot exitosamente")
-        else:
-            self._log("⚠️ Ruta generada pero no se pudo enviar al bot")
-    else:
-        self._log("❌ No se pudo conectar con el bot en Railway")
         
-except Exception as e:
-    self._log(f"❌ Error enviando al bot: {str(e)}")
+        # =========================================================================
+        # 🆕 NUEVO: ENVIAR RUTA AL BOT EN RAILWAY
+        # =========================================================================
+        
+        # 4. ENVIAR RUTA AL BOT EN RAILWAY
+        try:
+            # URL de tu bot en Railway
+            RAILWAY_URL = "https://monitoring-routes-pjcdmx-production.up.railway.app"
+            
+            conexion = ConexionBotRailway(RAILWAY_URL)
+            
+            if conexion.verificar_conexion():
+                if conexion.enviar_ruta_bot(ruta_telegram):
+                    self._log(f"📱 Ruta {ruta_id} enviada al bot exitosamente")
+                else:
+                    self._log("⚠️ Ruta generada pero no se pudo enviar al bot")
+            else:
+                self._log("❌ No se pudo conectar con el bot en Railway")
+                
+        except Exception as e:
+            self._log(f"❌ Error enviando al bot: {str(e)}")
 
-# 5. RETORNAR DATOS ORIGINALES + NUEVOS (FUERA del try/except)
-return {
-    'ruta_id': ruta_id,
-    'zona': zona,
-    'paradas': len(filas_opt),
-    'distancia': round(dist, 1),
-    'tiempo': round(tiempo),
-    'excel': excel_file,
-    'mapa': mapa_file,
-    'telegram_data': ruta_telegram,
-    'telegram_file': telegram_file
-}
+        # 5. RETORNAR DATOS ORIGINALES + NUEVOS
+        return {
+            'ruta_id': ruta_id,
+            'zona': zona,
+            'paradas': len(filas_opt),
+            'distancia': round(dist, 1),
+            'tiempo': round(tiempo),
+            'excel': excel_file,
+            'mapa': mapa_file,
+            'telegram_data': ruta_telegram,
+            'telegram_file': telegram_file
+        }
+    # ← AQUÍ CIERRA LA FUNCIÓN _crear_ruta_archivos
 
     def generate_routes(self):
         self._log("Starting Core Route Generation Process")
