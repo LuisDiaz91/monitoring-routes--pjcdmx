@@ -735,17 +735,23 @@ def recibir_rutas_desde_programa():
         print(f"❌ Error en API /api/rutas: {e}")
         return jsonify({"error": str(e)}), 500
         
-# ===============================================# =============================================================================
+# =============================================================================
 # CONFIGURACIÓN WEBHOOK PARA RAILWAY
 # =============================================================================
 
 @app.route('/webhook', methods=['POST', 'GET'])
 def webhook():
     if request.method == 'POST':
+        print("📨 WEBHOOK RECIBIDO - Procesando mensaje...")
         if request.headers.get('content-type') == 'application/json':
             json_string = request.get_data().decode('utf-8')
             update = telebot.types.Update.de_json(json_string)
+            
+            # 🆕 DEBUG: Ver qué está recibiendo
+            print(f"📝 Update recibido: {json_string[:200]}...")  # Primeros 200 chars
+            
             bot.process_new_updates([update])
+            print("✅ Update procesado")
             return 'OK', 200
     return 'Hello! Bot is running!', 200
 @app.route('/')
