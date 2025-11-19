@@ -168,7 +168,9 @@ def registrar_entrega_sistema(user_id, user_name, persona_entregada, foto_id=Non
 
 @bot.message_handler(commands=['start', 'hola'])
 def enviar_bienvenida(message):
-    welcome_text = f"""
+    print(f"🎯 COMANDO /start RECIBIDO de: {message.from_user.first_name}")
+    try:
+        welcome_text = f"""
 🤖 *BOT DE RUTAS AUTOMÁTICO - PJCDMX* 🚚
 
 ¡Hola {message.from_user.first_name}! Soy tu asistente de rutas automáticas.
@@ -186,9 +188,11 @@ def enviar_bienvenida(message):
 /atencionH - 👨‍💼 Soporte humano
 
 *¡El sistema asigna rutas automáticamente!*
-    """
-    bot.reply_to(message, welcome_text, parse_mode='Markdown')
-    print(f"📨 Start: {message.from_user.first_name}")
+        """
+        bot.reply_to(message, welcome_text, parse_mode='Markdown')
+        print("✅ Mensaje de bienvenida ENVIADO")
+    except Exception as e:
+        print(f"❌ ERROR enviando mensaje: {e}")
 
 @bot.message_handler(commands=['solicitar_ruta'])
 def solicitar_ruta_automatica(message):
