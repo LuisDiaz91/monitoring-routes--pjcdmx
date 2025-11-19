@@ -189,7 +189,7 @@ def enviar_bienvenida(message):
 
 *¡El sistema asigna rutas automáticamente!*
         """
-        bot.reply_to(message, welcome_text, parse_mode='Markdown')
+        bot.reply_to(message, welcome_text, parse_mode='HTML')
         print("✅ Mensaje de bienvenida ENVIADO")
     except Exception as e:
         print(f"❌ ERROR enviando mensaje: {e}")
