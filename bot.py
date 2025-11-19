@@ -766,27 +766,19 @@ def set_webhook():
     except Exception as e:
         print(f"❌ Error configurando webhook: {e}")
         return False
-# =============================================================================
 # CONFIGURACIÓN DE EJECUCIÓN MEJORADA - TODO INTEGRADO
 # =============================================================================
 
+# MUEVE la inicialización FUERA del if __name__
+print("\n🎯 SISTEMA AUTOMÁTICO DE RUTAS PJCDMX - 100% OPERATIVO")
+print("📱 Comandos: /solicitar_ruta, /miruta, /entregar, /estado_rutas")
+
+inicializar_sistema()
+
 if __name__ == "__main__":
-    print("\n🎯 SISTEMA AUTOMÁTICO DE RUTAS PJCDMX - 100% OPERATIVO")
-    print("📱 Comandos: /solicitar_ruta, /miruta, /entregar, /estado_rutas")
-    print("🚀 Inicializando en Railway...")
+    port = int(os.environ.get('PORT', 8000))
     
-    inicializar_sistema()
+    # Solo ejecutar Flask localmente, en Railway usará Gunicorn
+    print(f"🌐 Ejecutando en modo desarrollo - Puerto: {port}")
+    app.run(host='0.0.0.0', port=port, debug=False)
     
-    # 🆕 CONFIGURAR WEBHOOK PRIMERO
-    if set_webhook():
-        print("✅ Bot configurado con Webhook - Listo para recibir mensajes")
-        print("🌐 Servidor Flask ejecutándose con API y Webhook...")
-        
-        # 🆕 CORRECCIÓN: Un solo servidor Flask que maneje TODO
-        app.run(host='0.0.0.0', port=8000, debug=False, use_reloader=False)
-    else:
-        print("❌ Falló webhook, usando polling...")
-        try:
-            bot.polling(none_stop=True, interval=3, timeout=30)
-        except Exception as e:
-            print(f"❌ Error en polling: {e}")
