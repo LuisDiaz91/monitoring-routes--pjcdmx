@@ -784,5 +784,4 @@ if __name__ == "__main__":
     app.run(host='0.0.0.0', port=port, debug=False, threaded=True)
 
 # Railway usará Gunicorn via Procfile, no ejecutamos app.run() aquí
-print("✅ Bot inicializado - Esperando conexiones via Gunicorn...")
 
