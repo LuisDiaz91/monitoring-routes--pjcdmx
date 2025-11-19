@@ -646,13 +646,14 @@ class SistemaRutasGUI:
         # 🆕 NUEVO: Solo UNA llamada aquí
         self.root.after(1000, self.cargar_excel_desde_github)
     
-    def cargar_excel_desde_github(self):
+def cargar_excel_desde_github(self):
     """Cargar automáticamente el Excel de GitHub y configurar API"""
     try:
         # 1. 🆕 CONFIGURAR API KEY EN LA INTERFAZ
         self.api_entry.delete(0, tk.END)
         self.api_entry.insert(0, self.api_key)
         self.log("✅ API Key de Google Maps configurada automáticamente")
+        # ... resto del código de la función ...
         self.log("🗺️ Sistema listo para geocodificar direcciones")
         
         # 2. CARGAR EXCEL AUTOMÁTICAMENTE
