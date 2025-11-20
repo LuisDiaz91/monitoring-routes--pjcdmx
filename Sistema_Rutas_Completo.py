@@ -544,29 +544,30 @@ def generate_routes(self):
     else:
         self._log("'DIRECCIÓN' column not found.")
         return []
-        
-def extraer_alcaldia(d):
-            d = str(d).upper()
-            alcaldias = {
-                'CUAUHTEMOC': ['CUAUHTEMOC', 'CUÁUHTEMOC', 'DOCTORES', 'CENTRO', 'JUÁREZ', 'ROMA', 'CONDESA'],
-                'MIGUEL HIDALGO': ['MIGUEL HIDALGO', 'POLANCO', 'LOMAS', 'CHAPULTEPEC'],
-                'BENITO JUAREZ': ['BENITO JUÁREZ', 'DEL VALLE', 'NÁPOLES'],
-                'ALVARO OBREGON': ['ÁLVARO OBREGÓN', 'SAN ÁNGEL', 'LAS ÁGUILAS'],
-                'COYOACAN': ['COYOACÁN', 'COYOACAN'],
-                'TLALPAN': ['TLALPAN'],
-                'IZTAPALAPA': ['IZTAPALAPA'],
-                'GUSTAVO A. MADERO': ['GUSTAVO A. MADERO'],
-                'AZCAPOTZALCO': ['AZCAPOTZALCO'],
-                'VENUSTIANO CARRANZA': ['VENUSTIANO CARRANZA'],
-                'XOCHIMILCO': ['XOCHIMILCO'],
-                'IZTACALCO': ['IZTACALCO'],
-                'MILPA ALTA': ['MILPA ALTA'],
-                'TLÁHUAC': ['TLÁHUAC']
-            }
-            for alc, palabras in alcaldias.items():
-                if any(p in d for p in palabras):
-                    return alc.title()
-            return "NO IDENTIFICADA"
+
+    # 🟢🟢🟢 CORRECTO - DENTRO de generate_routes, CON 4 ESPACIOS 🟢🟢🟢
+    def extraer_alcaldia(d):
+        d = str(d).upper()
+        alcaldias = {
+            'CUAUHTEMOC': ['CUAUHTEMOC', 'CUÁUHTEMOC', 'DOCTORES', 'CENTRO', 'JUÁREZ', 'ROMA', 'CONDESA'],
+            'MIGUEL HIDALGO': ['MIGUEL HIDALGO', 'POLANCO', 'LOMAS', 'CHAPULTEPEC'],
+            'BENITO JUAREZ': ['BENITO JUÁREZ', 'DEL VALLE', 'NÁPOLES'],
+            'ALVARO OBREGON': ['ÁLVARO OBREGÓN', 'SAN ÁNGEL', 'LAS ÁGUILAS'],
+            'COYOACAN': ['COYOACÁN', 'COYOACAN'],
+            'TLALPAN': ['TLALPAN'],
+            'IZTAPALAPA': ['IZTAPALAPA'],
+            'GUSTAVO A. MADERO': ['GUSTAVO A. MADERO'],
+            'AZCAPOTZALCO': ['AZCAPOTZALCO'],
+            'VENUSTIANO CARRANZA': ['VENUSTIANO CARRANZA'],
+            'XOCHIMILCO': ['XOCHIMILCO'],
+            'IZTACALCO': ['IZTACALCO'],
+            'MILPA ALTA': ['MILPA ALTA'],
+            'TLÁHUAC': ['TLÁHUAC']
+        }
+        for alc, palabras in alcaldias.items():
+            if any(p in d for p in palabras):
+                return alc.title()
+        return "NO IDENTIFICADA"
         df_clean['Alcaldia'] = df_clean['DIRECCIÓN'].apply(extraer_alcaldia)
         ZONAS = {
             'CENTRO': ['Cuauhtemoc', 'Venustiano Carranza', 'Miguel Hidalgo'],
