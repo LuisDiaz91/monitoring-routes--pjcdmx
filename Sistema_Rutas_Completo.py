@@ -519,24 +519,33 @@ class CoreRouteGenerator:
         }
     # ← AQUÍ CIERRA LA FUNCIÓN _crear_ruta_archivos
 
-    def generate_routes(self):
-        self._log("Starting Core Route Generation Process")
-        self._log(f"Initial data records: {len(self.df)}")
-        if self.df.empty:
-            self._log("No data to process.")
-            return []
-        df_clean = self.df.copy()
-        if 'DIRECCIÓN' in df_clean.columns:
-            df_clean['DIRECCIÓN'] = df_clean['DIRECCIÓN'].astype(str).str.replace('\n', ' ', regex=False).str.strip()
-            df_clean['DIRECCIÓN'] = df_clean['DIRECCIÓN'].str.split('/').str[0]
-            df_clean = df_clean[df_clean['DIRECCIÓN'].str.contains('CDMX|Ciudad de México', case=False, na=False)]
-        else:
-            self._log("'DIRECCIÓN' column not found.")
-            return []
-        self._log(f"Valid records after cleaning: {len(df_clean)}")
-        if df_clean.empty:
-            return []
-        def extraer_alcaldia(d):
+def generate_routes(self):
+    self._log("Starting Core Route Generation Process")
+    self._log(f"Initial data records: {len(self.df)}")
+    if self.df.empty:
+        self._log("No data to process.")
+        return []
+    
+    df_clean = self.df.copy()
+    if 'DIRECCIÓN' in df_clean.columns:
+        df_clean['DIRECCIÓN'] = df_clean['DIRECCIÓN'].astype(str).str.replace('\n', ' ', regex=False).str.strip()
+        df_clean['DIRECCIÓN'] = df_clean['DIRECCIÓN'].str.split('/').str[0]
+        
+        # 🎯 FILTRO INTELIGENTE - reconoce CDMX en todas sus variantes
+        mask = (
+            df_clean['DIRECCIÓN'].str.contains(r'CDMX|CIUDAD DE MÉXICO|CIUDAD DE MEXICO', case=False, na=False) |
+            df_clean['DIRECCIÓN'].str.contains(r'CD\.MX|MÉXICO D\.F\.|MEXICO D\.F\.', case=False, na=False) |
+            (df_clean['ALCALDÍA'].notna() if 'ALCALDÍA' in df_clean.columns else False)  # Si tiene alcaldía
+        )
+
+        df_clean = df_clean[mask]
+        self._log(f"📍 Registros después de filtro inteligente: {len(df_clean)}")
+        
+    else:
+        self._log("'DIRECCIÓN' column not found.")
+        return []
+        
+def extraer_alcaldia(d):
             d = str(d).upper()
             alcaldias = {
                 'CUAUHTEMOC': ['CUAUHTEMOC', 'CUÁUHTEMOC', 'DOCTORES', 'CENTRO', 'JUÁREZ', 'ROMA', 'CONDESA'],
