@@ -261,7 +261,7 @@ class GestorTelegram:
         return self.procesar_entrega_repartidor(datos_entrega)
 
 # =============================================================================
-# CLASE PRINCIPAL - MOTOR DE RUTAS (CoreRouteGenerator)
+# CLASE PRINCIPAL - MOTOR DE RUTAS (CoreRouteGenerator) - CORREGIDA
 # =============================================================================
 class CoreRouteGenerator:
     def __init__(self, df, api_key, origen_coords, origen_name, max_stops_per_route):
@@ -381,9 +381,9 @@ class CoreRouteGenerator:
                 'Dependencia': str(fila.get('ADSCRIPCIÓN', 'N/A')).strip(),
                 'Dirección': str(fila.get('DIRECCIÓN', 'N/A')).strip(),
                 'Acuse': '',
-                'Repartidor': '',  # 🆕 NUEVO
-                'Foto_Acuse': '',  # 🆕 NUEVO
-                'Timestamp_Entrega': ''  # 🆕 NUEVO
+                'Repartidor': '',
+                'Foto_Acuse': '',
+                'Timestamp_Entrega': ''
             })
         excel_df = pd.DataFrame(excel_data)
         excel_file = f"rutas_excel/Ruta_{ruta_id}_{zona}.xlsx"
@@ -434,19 +434,14 @@ class CoreRouteGenerator:
         except Exception as e:
             self._log(f"Error generating map: {str(e)}")
             
-        # =========================================================================
-        # 🆕 NUEVO: GENERAR DATOS PARA TELEGRAM
-        # =========================================================================
-        
-        # 1. GENERAR ENLACE GOOGLE MAPS
+        # GENERAR DATOS PARA TELEGRAM
         waypoints = "|".join([f"{lat},{lng}" for lat, lng in coords_opt])
         google_maps_url = f"https://www.google.com/maps/dir/{self.origen_coords}/{waypoints}"
         
-        # 2. CREAR ESTRUCTURA PARA TELEGRAM
         ruta_telegram = {
             'ruta_id': ruta_id,
             'zona': zona,
-            'repartidor_asignado': None,  # Se asignará después
+            'repartidor_asignado': None,
             'google_maps_url': google_maps_url,
             'paradas': [
                 {
@@ -455,9 +450,9 @@ class CoreRouteGenerator:
                     'direccion': str(fila.get('DIRECCIÓN', 'N/A')).strip(),
                     'dependencia': str(fila.get('ADSCRIPCIÓN', 'N/A')).strip(),
                     'coords': f"{coord[0]},{coord[1]}",
-                    'estado': 'pendiente',  # 🆕 NUEVO
-                    'timestamp_entrega': None,  # 🆕 NUEVO
-                    'foto_acuse': None  # 🆕 NUEVO
+                    'estado': 'pendiente',
+                    'timestamp_entrega': None,
+                    'foto_acuse': None
                 }
                 for i, (fila, coord) in enumerate(zip(filas_opt, coords_opt), 1)
             ],
@@ -467,14 +462,13 @@ class CoreRouteGenerator:
                 'tiempo_min': round(tiempo),
                 'origen': self.origen_name
             },
-            'estado': 'pendiente',  # pendiente, en_progreso, completada
-            'fotos_acuses': [],  # Se llenará con las fotos del bot
+            'estado': 'pendiente',
+            'fotos_acuses': [],
             'timestamp_creacion': datetime.now().isoformat(),
-            'excel_original': excel_file,  # 🆕 NUEVO - Para actualizar después
-            'indices_originales': indices # 🆕 NUEVO - Para mapear filas
+            'excel_original': excel_file,
+            'indices_originales': indices
         }
         
-        # 3. GUARDAR ARCHIVO JSON PARA TELEGRAM
         telegram_file = f"rutas_telegram/Ruta_{ruta_id}_{zona}.json"
         try:
             with open(telegram_file, 'w', encoding='utf-8') as f:
@@ -483,15 +477,9 @@ class CoreRouteGenerator:
         except Exception as e:
             self._log(f"❌ Error guardando datos Telegram: {str(e)}")
         
-        # =========================================================================
-        # 🆕 NUEVO: ENVIAR RUTA AL BOT EN RAILWAY
-        # =========================================================================
-        
-        # 4. ENVIAR RUTA AL BOT EN RAILWAY
+        # ENVIAR RUTA AL BOT EN RAILWAY
         try:
-            # URL de tu bot en Railway
             RAILWAY_URL = "https://monitoring-routes-pjcdmx-production.up.railway.app"
-            
             conexion = ConexionBotRailway(RAILWAY_URL)
             
             if conexion.verificar_conexion():
@@ -505,7 +493,6 @@ class CoreRouteGenerator:
         except Exception as e:
             self._log(f"❌ Error enviando al bot: {str(e)}")
 
-        # 5. RETORNAR DATOS ORIGINALES + NUEVOS
         return {
             'ruta_id': ruta_id,
             'zona': zona,
@@ -517,79 +504,82 @@ class CoreRouteGenerator:
             'telegram_data': ruta_telegram,
             'telegram_file': telegram_file
         }
-    # ← AQUÍ CIERRA LA FUNCIÓN _crear_ruta_archivos
 
-def generate_routes(self):
-    self._log("Starting Core Route Generation Process")
-    self._log(f"Initial data records: {len(self.df)}")
-    if self.df.empty:
-        self._log("No data to process.")
-        return []
-    
-    df_clean = self.df.copy()
-    if 'DIRECCIÓN' in df_clean.columns:
-        df_clean['DIRECCIÓN'] = df_clean['DIRECCIÓN'].astype(str).str.replace('\n', ' ', regex=False).str.strip()
-        df_clean['DIRECCIÓN'] = df_clean['DIRECCIÓN'].str.split('/').str[0]
+    def generate_routes(self):
+        self._log("Starting Core Route Generation Process")
+        self._log(f"Initial data records: {len(self.df)}")
+        if self.df.empty:
+            self._log("No data to process.")
+            return []
         
-        # 🎯 FILTRO INTELIGENTE - reconoce CDMX en todas sus variantes
-        mask = (
-            df_clean['DIRECCIÓN'].str.contains(r'CDMX|CIUDAD DE MÉXICO|CIUDAD DE MEXICO', case=False, na=False) |
-            df_clean['DIRECCIÓN'].str.contains(r'CD\.MX|MÉXICO D\.F\.|MEXICO D\.F\.', case=False, na=False) |
-            (df_clean['ALCALDÍA'].notna() if 'ALCALDÍA' in df_clean.columns else False)  # Si tiene alcaldía
-        )
-
-        df_clean = df_clean[mask]
-        self._log(f"📍 Registros después de filtro inteligente: {len(df_clean)}")
+        df_clean = self.df.copy()
+        if 'DIRECCIÓN' in df_clean.columns:
+            df_clean['DIRECCIÓN'] = df_clean['DIRECCIÓN'].astype(str).str.replace('\n', ' ', regex=False).str.strip()
+            df_clean['DIRECCIÓN'] = df_clean['DIRECCIÓN'].str.split('/').str[0]
+            
+            # 🎯 FILTRO INTELIGENTE
+            mask = (
+                df_clean['DIRECCIÓN'].str.contains(r'CDMX|CIUDAD DE MÉXICO|CIUDAD DE MEXICO', case=False, na=False) |
+                df_clean['DIRECCIÓN'].str.contains(r'CD\.MX|MÉXICO D\.F\.|MEXICO D\.F\.', case=False, na=False) |
+                (df_clean['ALCALDÍA'].notna() if 'ALCALDÍA' in df_clean.columns else False)
+            )
+            df_clean = df_clean[mask]
+            self._log(f"📍 Registros después de filtro inteligente: {len(df_clean)}")
+        else:
+            self._log("'DIRECCIÓN' column not found.")
+            return []
         
-    else:
-        self._log("'DIRECCIÓN' column not found.")
-        return []
-
-    # 🟢🟢🟢 CORRECTO - DENTRO de generate_routes, CON 4 ESPACIOS 🟢🟢🟢
-    def extraer_alcaldia(d):
-        d = str(d).upper()
-        alcaldias = {
-            'CUAUHTEMOC': ['CUAUHTEMOC', 'CUÁUHTEMOC', 'DOCTORES', 'CENTRO', 'JUÁREZ', 'ROMA', 'CONDESA'],
-            'MIGUEL HIDALGO': ['MIGUEL HIDALGO', 'POLANCO', 'LOMAS', 'CHAPULTEPEC'],
-            'BENITO JUAREZ': ['BENITO JUÁREZ', 'DEL VALLE', 'NÁPOLES'],
-            'ALVARO OBREGON': ['ÁLVARO OBREGÓN', 'SAN ÁNGEL', 'LAS ÁGUILAS'],
-            'COYOACAN': ['COYOACÁN', 'COYOACAN'],
-            'TLALPAN': ['TLALPAN'],
-            'IZTAPALAPA': ['IZTAPALAPA'],
-            'GUSTAVO A. MADERO': ['GUSTAVO A. MADERO'],
-            'AZCAPOTZALCO': ['AZCAPOTZALCO'],
-            'VENUSTIANO CARRANZA': ['VENUSTIANO CARRANZA'],
-            'XOCHIMILCO': ['XOCHIMILCO'],
-            'IZTACALCO': ['IZTACALCO'],
-            'MILPA ALTA': ['MILPA ALTA'],
-            'TLÁHUAC': ['TLÁHUAC']
-        }
-        for alc, palabras in alcaldias.items():
-            if any(p in d for p in palabras):
-                return alc.title()
-        return "NO IDENTIFICADA"
+        def extraer_alcaldia(d):
+            d = str(d).upper()
+            alcaldias = {
+                'CUAUHTEMOC': ['CUAUHTEMOC', 'CUÁUHTEMOC', 'DOCTORES', 'CENTRO', 'JUÁREZ', 'ROMA', 'CONDESA'],
+                'MIGUEL HIDALGO': ['MIGUEL HIDALGO', 'POLANCO', 'LOMAS', 'CHAPULTEPEC'],
+                'BENITO JUAREZ': ['BENITO JUÁREZ', 'DEL VALLE', 'NÁPOLES'],
+                'ALVARO OBREGON': ['ÁLVARO OBREGÓN', 'SAN ÁNGEL', 'LAS ÁGUILAS'],
+                'COYOACAN': ['COYOACÁN', 'COYOACAN'],
+                'TLALPAN': ['TLALPAN'],
+                'IZTAPALAPA': ['IZTAPALAPA'],
+                'GUSTAVO A. MADERO': ['GUSTAVO A. MADERO'],
+                'AZCAPOTZALCO': ['AZCAPOTZALCO'],
+                'VENUSTIANO CARRANZA': ['VENUSTIANO CARRANZA'],
+                'XOCHIMILCO': ['XOCHIMILCO'],
+                'IZTACALCO': ['IZTACALCO'],
+                'MILPA ALTA': ['MILPA ALTA'],
+                'TLÁHUAC': ['TLÁHUAC']
+            }
+            for alc, palabras in alcaldias.items():
+                if any(p in d for p in palabras):
+                    return alc.title()
+            return "NO IDENTIFICADA"
+        
         df_clean['Alcaldia'] = df_clean['DIRECCIÓN'].apply(extraer_alcaldia)
+        
         ZONAS = {
             'CENTRO': ['Cuauhtemoc', 'Venustiano Carranza', 'Miguel Hidalgo'],
             'SUR': ['Coyoacán', 'Tlalpan', 'Álvaro Obregón', 'Benito Juárez'],
             'ORIENTE': ['Iztacalco', 'Iztapalapa', 'Gustavo A. Madero'],
             'SUR_ORIENTE': ['Xochimilco', 'Milpa Alta', 'Tláhuac'],
         }
+        
         def asignar_zona(alc):
             for zona_name, alcaldias_in_zone in ZONAS.items():
                 if alc in alcaldias_in_zone:
                     return zona_name
             return 'OTRAS'
+        
         df_clean['Zona'] = df_clean['Alcaldia'].apply(asignar_zona)
+        
         subgrupos = {}
         for zona in df_clean['Zona'].unique():
             dirs = df_clean[df_clean['Zona'] == zona].index.tolist()
             subgrupos[zona] = [dirs[i:i+self.max_stops_per_route] for i in range(0, len(dirs), self.max_stops_per_route)]
             self._log(f"{zona}: {len(dirs)} addresses to {len(subgrupos[zona])} routes")
+        
         self._log("Generating Optimized Routes...")
         self.results = []
         ruta_id = 1
         total_routes_to_process = sum(len(grupos) for grupos in subgrupos.values())
+        
         for zona in subgrupos.keys():
             for i, grupo in enumerate(subgrupos[zona]):
                 self._log(f"Processing Route {ruta_id} of {total_routes_to_process}: {zona}")
@@ -600,12 +590,14 @@ def generate_routes(self):
                 except Exception as e:
                     self._log(f"Error in route {ruta_id}: {str(e)}")
                 ruta_id += 1
+        
         try:
             with open(self.CACHE_FILE, 'w') as f:
                 json.dump(self.GEOCODE_CACHE, f)
             self._log("Geocode cache saved.")
         except Exception as e:
             self._log(f"Error saving cache: {str(e)}")
+        
         if self.results:
             resumen_df = pd.DataFrame([{
                 'Ruta': r['ruta_id'],
@@ -621,14 +613,15 @@ def generate_routes(self):
                 self._log("Summary 'RESUMEN_RUTAS.xlsx' generated.")
             except Exception as e:
                 self._log(f"Error generating summary: {str(e)}")
+        
         total_routes_gen = len(self.results)
         total_paradas = sum(r['paradas'] for r in self.results) if self.results else 0
         total_distancia = sum(r['distancia'] for r in self.results) if self.results else 0
         total_tiempo = sum(r['tiempo'] for r in self.results) if self.results else 0
+        
         self._log("CORE ROUTE GENERATION COMPLETED")
         self._log(f"FINAL SUMMARY: {total_routes_gen} routes, {total_paradas} stops")
         return self.results
-
 # =============================================================================
 # CLASE INTERFAZ GRÁFICA (SistemaRutasGUI) - COMPLETA Y CORREGIDA
 # =============================================================================
