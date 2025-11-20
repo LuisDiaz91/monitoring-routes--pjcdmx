@@ -1,4 +1,4 @@
-# sistema_rutas_completo.py
+# sistema_rutas_completo_mejorado.py
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, scrolledtext
 import pandas as pd
@@ -15,9 +15,11 @@ import webbrowser
 import sys
 import subprocess
 import shutil
+from PIL import Image, ImageTk
+import io
 
 # =============================================================================
-# CLASE CONEXIÓN CON BOT RAILWAY
+# CLASE CONEXIÓN CON BOT RAILWAY - MEJORADA
 # =============================================================================
 class ConexionBotRailway:
     def __init__(self, url_base):
@@ -56,13 +58,26 @@ class ConexionBotRailway:
         except:
             return False
 
+    def descargar_foto(self, url_foto, ruta_destino):
+        """Descarga una foto desde Telegram y la guarda localmente"""
+        try:
+            response = requests.get(url_foto, timeout=30)
+            if response.status_code == 200:
+                with open(ruta_destino, 'wb') as f:
+                    f.write(response.content)
+                return True
+            return False
+        except Exception as e:
+            print(f"❌ Error descargando foto: {e}")
+            return False
+
 # =============================================================================
-# CLASE GESTOR TELEGRAM
+# CLASE GESTOR TELEGRAM - COMPLETAMENTE MEJORADA
 # =============================================================================
 class GestorTelegram:
     def __init__(self, gui_principal):
         self.gui = gui_principal
-        self.carpetas = ['rutas_telegram', 'avances_ruta', 'incidencias_trafico', 'fotos_acuses']
+        self.carpetas = ['rutas_telegram', 'avances_ruta', 'incidencias_trafico', 'fotos_acuses', 'fotos_entregas', 'fotos_reportes']
         self._inicializar_carpetas()
         
     def _inicializar_carpetas(self):
@@ -92,34 +107,74 @@ class GestorTelegram:
             return False
     
     def procesar_entrega_repartidor(self, datos_entrega):
-        """Procesa una entrega reportada por el bot"""
+        """Procesa una entrega reportada por el bot CON FOTOS MEJORADO"""
         try:
             # 1. GUARDAR AVANCE
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             archivo_avance = f"avances_ruta/entrega_{timestamp}.json"
             
+            # 🆕 MEJORA: Procesar foto antes de guardar
+            datos_entrega = self._procesar_foto_entrega(datos_entrega)
+            
             with open(archivo_avance, 'w', encoding='utf-8') as f:
                 json.dump(datos_entrega, f, indent=2, ensure_ascii=False)
             
-            # 2. ACTUALIZAR EXCEL ORIGINAL
+            # 2. ACTUALIZAR EXCEL ORIGINAL CON FOTOS
             self._actualizar_excel_entrega(datos_entrega)
             
             # 3. ACTUALIZAR ESTADO DE RUTA
             self._actualizar_estado_ruta(datos_entrega)
             
             self.gui.log(f"📦 Entrega procesada: {datos_entrega.get('persona_entregada', 'N/A')}")
+            if datos_entrega.get('foto_local'):
+                self.gui.log(f"📸 Foto guardada: {datos_entrega.get('foto_local')}")
+            
             return True
             
         except Exception as e:
             self.gui.log(f"❌ Error procesando entrega: {str(e)}")
             return False
-    
+
+    def _procesar_foto_entrega(self, datos_entrega):
+        """Procesa y descarga la foto de entrega si viene de Telegram"""
+        try:
+            foto_url = datos_entrega.get('foto_acuse', '')
+            
+            if foto_url and foto_url.startswith('http'):
+                # Generar nombre único para la foto
+                ruta_id = datos_entrega.get('ruta_id', 'unknown')
+                persona = datos_entrega.get('persona_entregada', 'unknown').replace(' ', '_')
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                
+                nombre_archivo = f"entrega_{ruta_id}_{persona}_{timestamp}.jpg"
+                ruta_foto_local = f"fotos_entregas/{nombre_archivo}"
+                
+                # Descargar foto
+                response = requests.get(foto_url, timeout=30)
+                if response.status_code == 200:
+                    with open(ruta_foto_local, 'wb') as f:
+                        f.write(response.content)
+                    
+                    # Actualizar datos con ruta local
+                    datos_entrega['foto_local'] = ruta_foto_local
+                    datos_entrega['foto_descargada'] = True
+                    self.gui.log(f"✅ Foto descargada: {ruta_foto_local}")
+                else:
+                    self.gui.log(f"⚠️ No se pudo descargar foto: {foto_url}")
+                    datos_entrega['foto_local'] = foto_url  # Mantener URL original
+            
+            return datos_entrega
+            
+        except Exception as e:
+            self.gui.log(f"⚠️ Error procesando foto: {str(e)}")
+            return datos_entrega
+
     def _actualizar_excel_entrega(self, datos_entrega):
-        """Actualiza el Excel original con la entrega"""
+        """Actualiza el Excel original con la entrega Y la foto - MEJORADO"""
         try:
             ruta_id = datos_entrega.get('ruta_id')
             persona_entregada = datos_entrega.get('persona_entregada')
-            foto_acuse = datos_entrega.get('foto_acuse', '')
+            foto_acuse = datos_entrega.get('foto_local') or datos_entrega.get('foto_acuse', '')
             repartidor = datos_entrega.get('repartidor', '')
             timestamp = datos_entrega.get('timestamp', '')
             
@@ -128,6 +183,7 @@ class GestorTelegram:
                            if f.startswith(f'Ruta_{ruta_id}_')]
             
             if not archivos_ruta:
+                self.gui.log(f"❌ No se encontró archivo de ruta para Ruta_{ruta_id}")
                 return False
                 
             with open(f'rutas_telegram/{archivos_ruta[0]}', 'r', encoding='utf-8') as f:
@@ -135,29 +191,75 @@ class GestorTelegram:
             
             excel_file = ruta_data.get('excel_original')
             if not excel_file or not os.path.exists(excel_file):
+                self.gui.log(f"❌ Archivo Excel no encontrado: {excel_file}")
                 return False
             
             # Leer y actualizar Excel
             df = pd.read_excel(excel_file)
             
-            # Buscar la fila correspondiente a la persona
+            # 🆕 MEJORA: Buscar la fila correspondiente de manera más inteligente
+            persona_encontrada = False
             for idx, fila in df.iterrows():
-                if persona_entregada.lower() in str(fila.get('Nombre', '')).lower():
-                    # Actualizar acuse
+                nombre_celda = str(fila.get('Nombre', '')).strip().lower()
+                persona_buscar = persona_entregada.strip().lower()
+                
+                # Búsqueda flexible: contiene o es similar
+                if (persona_buscar in nombre_celda or 
+                    nombre_celda in persona_buscar or
+                    self._nombres_similares(persona_buscar, nombre_celda)):
+                    
+                    # 🆕 ACTUALIZACIÓN COMPLETA
                     df.at[idx, 'Acuse'] = f"✅ ENTREGADO - {timestamp}"
                     df.at[idx, 'Repartidor'] = repartidor
                     df.at[idx, 'Foto_Acuse'] = foto_acuse
+                    df.at[idx, 'Timestamp_Entrega'] = timestamp
+                    df.at[idx, 'Estado'] = 'ENTREGADO'
+                    
+                    # 🆕 Si existe columna de coordenadas, actualizar
+                    if 'Coordenadas' in df.columns:
+                        coords = datos_entrega.get('coords_entrega', '')
+                        if coords:
+                            df.at[idx, 'Coordenadas'] = coords
+                    
+                    persona_encontrada = True
+                    self.gui.log(f"📊 Excel actualizado para: {persona_entregada}")
                     break
+            
+            if not persona_encontrada:
+                self.gui.log(f"⚠️ Persona no encontrada en Excel: {persona_entregada}")
+                # 🆕 Agregar como nueva fila al final
+                nueva_fila = {
+                    'Nombre': persona_entregada,
+                    'Acuse': f"✅ ENTREGADO - {timestamp}",
+                    'Repartidor': repartidor,
+                    'Foto_Acuse': foto_acuse,
+                    'Timestamp_Entrega': timestamp,
+                    'Estado': 'ENTREGADO'
+                }
+                df = pd.concat([df, pd.DataFrame([nueva_fila])], ignore_index=True)
+                self.gui.log(f"📝 Nueva fila agregada para: {persona_entregada}")
             
             # Guardar Excel actualizado
             df.to_excel(excel_file, index=False)
-            self.gui.log(f"📊 Excel actualizado: {os.path.basename(excel_file)}")
+            self.gui.log(f"💾 Excel guardado: {os.path.basename(excel_file)}")
             return True
             
         except Exception as e:
-            self.gui.log(f"❌ Error actualizando Excel: {str(e)}")
+            self.gui.log(f"❌ Error crítico actualizando Excel: {str(e)}")
             return False
-    
+
+    def _nombres_similares(self, nombre1, nombre2):
+        """Verifica si dos nombres son similares (para matching flexible)"""
+        # Eliminar títulos y palabras comunes
+        palabras_comunes = ['lic', 'lic.', 'ingeniero', 'ing', 'dr', 'doctor', 'mtro', 'maestro']
+        n1 = ' '.join([p for p in nombre1.split() if p.lower() not in palabras_comunes])
+        n2 = ' '.join([p for p in nombre2.split() if p.lower() not in palabras_comunes])
+        
+        # Verificar si comparten al menos 2 palabras
+        palabras1 = set(n1.lower().split())
+        palabras2 = set(n2.lower().split())
+        return len(palabras1.intersection(palabras2)) >= 2
+
     def _actualizar_estado_ruta(self, datos_entrega):
         """Actualiza el estado de la ruta en el archivo JSON"""
         try:
@@ -177,7 +279,8 @@ class GestorTelegram:
                 if persona_entregada.lower() in parada.get('nombre', '').lower():
                     parada['estado'] = 'entregado'
                     parada['timestamp_entrega'] = datos_entrega.get('timestamp')
-                    parada['foto_acuse'] = datos_entrega.get('foto_acuse', '')
+                    parada['foto_acuse'] = datos_entrega.get('foto_local') or datos_entrega.get('foto_acuse', '')
+                    parada['repartidor'] = datos_entrega.get('repartidor', '')
                     break
             
             # Verificar si todas las paradas están completadas
@@ -187,8 +290,12 @@ class GestorTelegram:
             if not paradas_pendientes:
                 ruta_data['estado'] = 'completada'
                 ruta_data['timestamp_completada'] = datetime.now().isoformat()
+                self.gui.log(f"🎉 ¡Ruta {ruta_id} COMPLETADA!")
             else:
                 ruta_data['estado'] = 'en_progreso'
+                progreso = len([p for p in ruta_data.get('paradas', []) if p.get('estado') == 'entregado'])
+                total = len(ruta_data.get('paradas', []))
+                self.gui.log(f"📊 Progreso Ruta {ruta_id}: {progreso}/{total} entregas")
             
             # Guardar archivo actualizado
             with open(f'rutas_telegram/{archivos_ruta[0]}', 'w', encoding='utf-8') as f:
@@ -201,20 +308,59 @@ class GestorTelegram:
             return False
     
     def procesar_incidencia(self, datos_incidencia):
-        """Procesa una incidencia reportada por el bot"""
+        """Procesa una incidencia reportada por el bot CON FOTOS SEPARADAS"""
         try:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            archivo_incidencia = f"incidencias_trafico/incidencia_{timestamp}.json"
+            tipo_incidencia = datos_incidencia.get('tipo', 'incidencia')
             
+            # 🆕 NUEVO: Procesar fotos de reportes
+            datos_incidencia = self._procesar_fotos_reporte(datos_incidencia)
+            
+            # Guardar metadata de la incidencia
+            archivo_incidencia = f"incidencias_trafico/incidencia_{timestamp}.json"
             with open(archivo_incidencia, 'w', encoding='utf-8') as f:
                 json.dump(datos_incidencia, f, indent=2, ensure_ascii=False)
             
-            self.gui.log(f"🚨 Incidencia reportada: {datos_incidencia.get('tipo', 'N/A')}")
+            self.gui.log(f"🚨 Incidencia reportada: {tipo_incidencia} con {len(datos_incidencia.get('fotos_locales', []))} fotos")
             return True
             
         except Exception as e:
             self.gui.log(f"❌ Error procesando incidencia: {str(e)}")
             return False
+
+    def _procesar_fotos_reporte(self, datos_incidencia):
+        """Procesa y descarga fotos de reportes/incidencias"""
+        try:
+            fotos_urls = datos_incidencia.get('fotos', [])
+            fotos_locales = []
+            
+            for i, foto_url in enumerate(fotos_urls):
+                if foto_url.startswith('http'):
+                    # Generar nombre único
+                    tipo = datos_incidencia.get('tipo', 'reporte').replace(' ', '_')
+                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    nombre_foto = f"reporte_{tipo}_{timestamp}_{i+1}.jpg"
+                    ruta_foto_local = f"fotos_reportes/{nombre_foto}"
+                    
+                    # Descargar foto
+                    response = requests.get(foto_url, timeout=30)
+                    if response.status_code == 200:
+                        with open(ruta_foto_local, 'wb') as f:
+                            f.write(response.content)
+                        
+                        fotos_locales.append(ruta_foto_local)
+                        self.gui.log(f"📸 Foto de reporte guardada: {ruta_foto_local}")
+                    else:
+                        self.gui.log(f"⚠️ No se pudo descargar foto de reporte: {foto_url}")
+                        fotos_locales.append(foto_url)  # Mantener URL original
+            
+            # Actualizar datos con rutas locales
+            datos_incidencia['fotos_locales'] = fotos_locales
+            return datos_incidencia
+            
+        except Exception as e:
+            self.gui.log(f"⚠️ Error procesando fotos de reporte: {str(e)}")
+            return datos_incidencia
     
     def obtener_rutas_pendientes(self):
         """Obtiene lista de rutas disponibles para asignar"""
@@ -223,13 +369,18 @@ class GestorTelegram:
             if archivo.endswith('.json'):
                 with open(f'rutas_telegram/{archivo}', 'r', encoding='utf-8') as f:
                     ruta_data = json.load(f)
-                    if ruta_data.get('estado') == 'pendiente':
+                    if ruta_data.get('estado') in ['pendiente', 'asignada']:
+                        paradas_entregadas = len([p for p in ruta_data.get('paradas', []) 
+                                                if p.get('estado') == 'entregado'])
                         rutas.append({
                             'archivo': archivo,
                             'ruta_id': ruta_data.get('ruta_id'),
                             'zona': ruta_data.get('zona'),
-                            'paradas': len(ruta_data.get('paradas', [])),
-                            'repartidor': ruta_data.get('repartidor_asignado')
+                            'paradas_total': len(ruta_data.get('paradas', [])),
+                            'paradas_entregadas': paradas_entregadas,
+                            'repartidor': ruta_data.get('repartidor_asignado'),
+                            'estado': ruta_data.get('estado'),
+                            'progreso': f"{paradas_entregadas}/{len(ruta_data.get('paradas', []))}"
                         })
         return rutas
     
@@ -248,20 +399,50 @@ class GestorTelegram:
         return avances
 
     def simular_entrega_bot(self, ruta_id, repartidor, persona_entregada):
-        """Simula una entrega del bot para pruebas"""
+        """Simula una entrega del bot para pruebas CON FOTO"""
+        # Crear una foto de prueba (puede ser un archivo vacío o una imagen de prueba)
+        os.makedirs('fotos_entregas', exist_ok=True)
+        foto_prueba = f"fotos_entregas/entrega_prueba_{ruta_id}.jpg"
+        
+        # Crear archivo de prueba si no existe
+        if not os.path.exists(foto_prueba):
+            with open(foto_prueba, 'w') as f:
+                f.write("Foto de prueba - Simulación")
+        
         datos_entrega = {
             'ruta_id': ruta_id,
             'repartidor': repartidor,
             'persona_entregada': persona_entregada,
-            'foto_acuse': f'fotos_acuses/entrega_{ruta_id}_{persona_entregada.replace(" ", "_")}.jpg',
+            'foto_acuse': foto_prueba,
+            'foto_local': foto_prueba,
             'timestamp': datetime.now().isoformat(),
             'coords_entrega': '19.4326077,-99.133208',
             'comentarios': 'Entregado en recepción - SIMULADO'
         }
         return self.procesar_entrega_repartidor(datos_entrega)
 
+    def forzar_actualizacion_fotos(self):
+        """Fuerza la actualización de todas las fotos pendientes en Excel"""
+        try:
+            self.gui.log("🔄 FORZANDO ACTUALIZACIÓN DE FOTOS EN EXCEL...")
+            
+            # Buscar todas las entregas procesadas
+            avances = self.obtener_avances_recientes(limite=100)
+            actualizaciones = 0
+            
+            for avance in avances:
+                if self._actualizar_excel_entrega(avance):
+                    actualizaciones += 1
+            
+            self.gui.log(f"✅ {actualizaciones} archivos Excel actualizados con fotos")
+            return actualizaciones
+            
+        except Exception as e:
+            self.gui.log(f"❌ Error forzando actualización: {str(e)}")
+            return 0
+
 # =============================================================================
-# CLASE PRINCIPAL - MOTOR DE RUTAS (CoreRouteGenerator) - CORREGIDA
+# CLASE PRINCIPAL - MOTOR DE RUTAS (CoreRouteGenerator) - MANTENIDO
 # =============================================================================
 class CoreRouteGenerator:
     def __init__(self, df, api_key, origen_coords, origen_name, max_stops_per_route):
@@ -372,7 +553,7 @@ class CoreRouteGenerator:
         os.makedirs("mapas_pro", exist_ok=True)
         os.makedirs("rutas_excel", exist_ok=True)
         
-        # 🆕 AGREGAR COLUMNAS ADICIONALES AL EXCEL
+        # 🆕 EXCEL MEJORADO CON COLUMNAS PARA FOTOS
         excel_data = []
         for i, (fila, coord) in enumerate(zip(filas_opt, coords_opt), 1):
             excel_data.append({
@@ -383,7 +564,9 @@ class CoreRouteGenerator:
                 'Acuse': '',
                 'Repartidor': '',
                 'Foto_Acuse': '',
-                'Timestamp_Entrega': ''
+                'Timestamp_Entrega': '',
+                'Estado': 'PENDIENTE',
+                'Coordenadas': f"{coord[0]},{coord[1]}"
             })
         excel_df = pd.DataFrame(excel_data)
         excel_file = f"rutas_excel/Ruta_{ruta_id}_{zona}.xlsx"
@@ -622,14 +805,15 @@ class CoreRouteGenerator:
         self._log("CORE ROUTE GENERATION COMPLETED")
         self._log(f"FINAL SUMMARY: {total_routes_gen} routes, {total_paradas} stops")
         return self.results
+
 # =============================================================================
-# CLASE INTERFAZ GRÁFICA (SistemaRutasGUI) - COMPLETA Y CORREGIDA
+# CLASE INTERFAZ GRÁFICA (SistemaRutasGUI) - COMPLETAMENTE MEJORADA
 # =============================================================================
 class SistemaRutasGUI:
     def __init__(self, root):
         self.root = root
-        self.root.title("Sistema Rutas PRO Ultra HD")
-        self.root.geometry("1000x750")
+        self.root.title("Sistema Rutas PRO Ultra HD - CON FOTOS")
+        self.root.geometry("1100x800")
         self.root.configure(bg='#f0f0f0')
         
         # 🆕 NUEVO: API Key automática AQUÍ
@@ -709,7 +893,7 @@ class SistemaRutasGUI:
         return df.loc[filas_validas]
 
     def _limpiar_carpetas_anteriores(self):
-        carpetas = ['mapas_pro', 'rutas_excel', 'rutas_telegram', 'avances_ruta', 'incidencias_trafico', 'fotos_acuses']
+        carpetas = ['mapas_pro', 'rutas_excel', 'rutas_telegram', 'avances_ruta', 'incidencias_trafico', 'fotos_acuses', 'fotos_entregas', 'fotos_reportes']
         for carpeta in carpetas:
             if os.path.exists(carpeta):
                 self.log(f"Limpiando carpeta {carpeta}...")
@@ -812,8 +996,8 @@ class SistemaRutasGUI:
         
         header_frame = ttk.Frame(main_frame)
         header_frame.pack(fill=tk.X, pady=(0, 20))
-        ttk.Label(header_frame, text="SISTEMA RUTAS PRO ULTRA HD", font=('Arial', 18, 'bold'), foreground='#2c3e50').pack()
-        ttk.Label(header_frame, text="Interfaz Gráfica - Portable", font=('Arial', 10), foreground='#7f8c8d').pack()
+        ttk.Label(header_frame, text="SISTEMA RUTAS PRO ULTRA HD - CON FOTOS", font=('Arial', 16, 'bold'), foreground='#2c3e50').pack()
+        ttk.Label(header_frame, text="Gestión completa de entregas con evidencias fotográficas", font=('Arial', 10), foreground='#7f8c8d').pack()
         
         config_frame = ttk.LabelFrame(main_frame, text="Configuración", padding="15")
         config_frame.pack(fill=tk.X, pady=(0, 10))
@@ -864,7 +1048,26 @@ class SistemaRutasGUI:
         self.btn_refresh = ttk.Button(btn_frame, text="REFRESH", command=self.refresh_sistema)
         self.btn_refresh.pack(side=tk.LEFT, padx=(0, 10))
 
-        # 🆕 NUEVO: BOTONES MEJORADOS PARA TELEGRAM
+        # 🆕 NUEVO: BOTONES MEJORADOS PARA GESTIÓN DE FOTOS
+        fotos_frame = ttk.LabelFrame(main_frame, text="Gestión de Fotos y Evidencias", padding="15")
+        fotos_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        fotos_btn_frame = ttk.Frame(fotos_frame)
+        fotos_btn_frame.pack(fill=tk.X)
+        
+        ttk.Button(fotos_btn_frame, text="📸 VER FOTOS ENTREGAS", 
+                  command=self.ver_fotos_entregas).pack(side=tk.LEFT, padx=(0, 10))
+        
+        ttk.Button(fotos_btn_frame, text="🖼️ VER FOTOS REPORTES", 
+                  command=self.ver_fotos_reportes).pack(side=tk.LEFT, padx=(0, 10))
+        
+        ttk.Button(fotos_btn_frame, text="🔄 ACTUALIZAR FOTOS EXCEL", 
+                  command=self.forzar_actualizacion_fotos).pack(side=tk.LEFT, padx=(0, 10))
+        
+        ttk.Button(fotos_btn_frame, text="📊 VER ESTADO RUTAS", 
+                  command=self.ver_estado_rutas).pack(side=tk.LEFT, padx=(0, 10))
+
+        # 🆕 NUEVO: BOTONES PARA TELEGRAM
         telegram_frame = ttk.Frame(control_frame)
         telegram_frame.pack(fill=tk.X, pady=(10, 0))
         
@@ -873,9 +1076,6 @@ class SistemaRutasGUI:
         
         ttk.Button(telegram_frame, text="🔄 ACTUALIZAR AVANCES", 
                   command=self.actualizar_avances).pack(side=tk.LEFT, padx=(0, 10))
-        
-        ttk.Button(telegram_frame, text="📊 VER ESTADO RUTAS", 
-                  command=self.ver_estado_rutas).pack(side=tk.LEFT, padx=(0, 10))
         
         ttk.Button(telegram_frame, text="🧪 SIMULAR ENTREGA", 
                   command=self.simular_entrega_prueba).pack(side=tk.LEFT, padx=(0, 10))
@@ -891,6 +1091,43 @@ class SistemaRutasGUI:
         log_frame.pack(fill=tk.BOTH, expand=True)
         self.log_text = scrolledtext.ScrolledText(log_frame, height=20, wrap=tk.WORD)
         self.log_text.pack(fill=tk.BOTH, expand=True)
+
+    # 🆕 NUEVAS FUNCIONES PARA GESTIÓN DE FOTOS
+    def ver_fotos_entregas(self):
+        """Abre la carpeta de fotos de entregas"""
+        carpeta_entregas = "fotos_entregas"
+        if os.path.exists(carpeta_entregas) and os.listdir(carpeta_entregas):
+            self.abrir_carpeta(carpeta_entregas)
+            self.log(f"📁 Abriendo carpeta de fotos de entregas: {carpeta_entregas}")
+        else:
+            self.log("📁 No hay fotos de entregas aún")
+            messagebox.showinfo("Fotos Entregas", "Aún no hay fotos de entregas descargadas")
+
+    def ver_fotos_reportes(self):
+        """Abre la carpeta de fotos de reportes"""
+        carpeta_reportes = "fotos_reportes"
+        if os.path.exists(carpeta_reportes) and os.listdir(carpeta_reportes):
+            self.abrir_carpeta(carpeta_reportes)
+            self.log(f"📁 Abriendo carpeta de fotos de reportes: {carpeta_reportes}")
+        else:
+            self.log("📁 No hay fotos de reportes aún")
+            messagebox.showinfo("Fotos Reportes", "Aún no hay fotos de reportes/incidencias")
+
+    def forzar_actualizacion_fotos(self):
+        """Fuerza la actualización de todas las fotos pendientes en Excel"""
+        try:
+            self.log("🔄 FORZANDO ACTUALIZACIÓN DE FOTOS EN EXCEL...")
+            
+            actualizaciones = self.gestor_telegram.forzar_actualizacion_fotos()
+            
+            if actualizaciones > 0:
+                messagebox.showinfo("Éxito", f"Se actualizaron {actualizaciones} archivos Excel con las fotos")
+            else:
+                messagebox.showinfo("Info", "No había archivos pendientes de actualizar")
+                
+        except Exception as e:
+            self.log(f"❌ Error forzando actualización: {str(e)}")
+            messagebox.showerror("Error", f"No se pudieron actualizar las fotos:\n{str(e)}")
 
     def log(self, mensaje):
         timestamp = datetime.now().strftime("%H:%M:%S")
@@ -1085,7 +1322,7 @@ class SistemaRutasGUI:
             messagebox.showinfo("Resumen", "Primero genera las rutas")
 
     def refresh_sistema(self):
-        if messagebox.askyesno("REFRESH", "¿Borrar todo?\n\n• Mapas\n• Excels\n• Resumen\n• Log\n• Datos Telegram"):
+        if messagebox.askyesno("REFRESH", "¿Borrar todo?\n\n• Mapas\n• Excels\n• Resumen\n• Log\n• Datos Telegram\n• Fotos"):
             self._limpiar_carpetas_anteriores()
             self.log_text.delete(1.0, tk.END)
             self.log("Sistema REFRESCADO")
@@ -1125,7 +1362,7 @@ class SistemaRutasGUI:
             frame_ruta.pack(fill=tk.X, pady=5)
             
             ttk.Label(frame_ruta, 
-                     text=f"Ruta {ruta['ruta_id']} - {ruta['zona']} ({ruta['paradas']} paradas)",
+                     text=f"Ruta {ruta['ruta_id']} - {ruta['zona']} ({ruta['progreso']} entregas)",
                      font=('Arial', 10, 'bold')).pack(anchor=tk.W)
             
             # Selector de repartidor
@@ -1165,7 +1402,8 @@ class SistemaRutasGUI:
             repartidor = avance.get('repartidor', 'N/A')
             persona = avance.get('persona_entregada', 'N/A')
             timestamp = avance.get('timestamp', '')[:16]
-            self.log(f"   ✅ {repartidor} → {persona} [{timestamp}]")
+            tiene_foto = "📸" if avance.get('foto_local') or avance.get('foto_acuse') else ""
+            self.log(f"   ✅ {repartidor} → {persona} [{timestamp}] {tiene_foto}")
 
     # 🆕 NUEVA FUNCIÓN: VER ESTADO DE RUTAS
     def ver_estado_rutas(self):
@@ -1190,7 +1428,10 @@ class SistemaRutasGUI:
                 paradas_entregadas = len([p for p in ruta_data.get('paradas', []) 
                                         if p.get('estado') == 'entregado'])
                 
-                self.log(f"   🗺️ Ruta {ruta_id} ({zona}): {estado.upper()}")
+                # Icono según estado
+                icono = "🟢" if estado == 'completada' else "🟡" if estado == 'en_progreso' else "🔴"
+                
+                self.log(f"   {icono} Ruta {ruta_id} ({zona}): {estado.upper()}")
                 self.log(f"     👤 {repartidor} | 📦 {paradas_entregadas}/{paradas_totales} entregas")
                 
             except Exception as e:
@@ -1230,8 +1471,12 @@ class SistemaRutasGUI:
 # EJECUCIÓN PRINCIPAL
 # =============================================================================
 if __name__ == "__main__":
-    for carpeta in ['mapas_pro', 'rutas_excel', 'rutas_telegram', 'avances_ruta', 'incidencias_trafico', 'fotos_acuses']:
+    # Crear todas las carpetas necesarias
+    carpetas = ['mapas_pro', 'rutas_excel', 'rutas_telegram', 'avances_ruta', 
+                'incidencias_trafico', 'fotos_acuses', 'fotos_entregas', 'fotos_reportes']
+    for carpeta in carpetas:
         os.makedirs(carpeta, exist_ok=True)
+    
     root = tk.Tk()
     app = SistemaRutasGUI(root)
     root.mainloop()
