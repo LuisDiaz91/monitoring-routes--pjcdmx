@@ -7,7 +7,7 @@ import json
 import pandas as pd
 from telebot import types
 from datetime import datetime
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, Response  # 🆕 Response agregado
 import threading
 
 # 🆕 AGREGAR ESTA FUNCIÓN NUEVA - PEGALA AL PRINCIPIO DEL BOT
