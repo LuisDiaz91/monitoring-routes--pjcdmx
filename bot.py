@@ -830,6 +830,56 @@ def webhook():
 def index():
     return "🤖 Bot PJCDMX - Sistema de Rutas Automáticas 🚚"
 
+# =============================================================================
+# ENDPOINT TEMPORAL PARA VERIFICAR FOTOS
+# =============================================================================
+
+@app.route('/api/verificar_fotos')
+def verificar_fotos():
+    """Endpoint para verificar fotos en el filesystem actual"""
+    import os
+    import json
+    
+    try:
+        resultado = {
+            'status': 'success',
+            'directorio_actual': os.getcwd(),
+            'existe_carpeta_fotos': os.path.exists('fotos_acuses'),
+            'archivos_en_fotos_acuses': [],
+            'todos_los_archivos': [],
+            'timestamp': datetime.now().isoformat()
+        }
+        
+        # Verificar si existe la carpeta
+        if os.path.exists('fotos_acuses'):
+            archivos = os.listdir('fotos_acuses')
+            resultado['archivos_en_fotos_acuses'] = archivos
+            
+            # Ver detalles de cada archivo
+            for archivo in archivos:
+                ruta = f"fotos_acuses/{archivo}"
+                if os.path.exists(ruta):
+                    stat = os.stat(ruta)
+                    resultado['todos_los_archivos'].append({
+                        'nombre': archivo,
+                        'tamaño_bytes': stat.st_size,
+                        'fecha_creacion': datetime.fromtimestamp(stat.st_ctime).isoformat(),
+                        'existe': True
+                    })
+                else:
+                    resultado['todos_los_archivos'].append({
+                        'nombre': archivo, 
+                        'existe': False
+                    })
+        else:
+            resultado['error'] = 'Carpeta fotos_acuses no existe'
+        
+        print(f"🔍 Verificación fotos: {len(resultado['archivos_en_fotos_acuses'])} archivos encontrados")
+        return jsonify(resultado)
+        
+    except Exception as e:
+        return jsonify({'status': 'error', 'error': str(e)}), 500
+
 def set_webhook():
     """Configurar webhook en Railway"""
     try:
