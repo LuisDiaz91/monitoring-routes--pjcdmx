@@ -10,6 +10,37 @@ from datetime import datetime
 from flask import Flask, request, jsonify
 import threading
 
+# 🆕 AGREGAR ESTA FUNCIÓN NUEVA - PEGALA AL PRINCIPIO DEL BOT
+def descargar_foto_telegram(file_id, ruta_destino):
+    """Descarga la foto real desde Telegram"""
+    try:
+        print(f"🔄 Intentando descargar foto: {file_id}")
+        
+        # 1. Obtener file_path del file_id
+        file_info = bot.get_file(file_id)
+        file_url = f"https://api.telegram.org/file/bot{TOKEN}/{file_info.file_path}"
+        
+        print(f"📡 Descargando desde: {file_url}")
+        
+        # 2. Descargar imagen
+        response = requests.get(file_url, timeout=30)
+        if response.status_code == 200:
+            # Asegurar que la carpeta existe
+            os.makedirs(os.path.dirname(ruta_destino), exist_ok=True)
+            
+            with open(ruta_destino, 'wb') as f:
+                f.write(response.content)
+            
+            print(f"✅ Foto descargada: {ruta_destino} ({len(response.content)} bytes)")
+            return True
+        else:
+            print(f"❌ Error HTTP: {response.status_code}")
+            
+    except Exception as e:
+        print(f"❌ Error descargando foto: {str(e)}")
+    
+    return False
+
 # 🆕 AGREGA ESTA LÍNEA CRÍTICA
 app = Flask(__name__)
 
@@ -505,26 +536,63 @@ def manejar_ubicacion(message):
     bot.reply_to(message, respuesta, parse_mode='Markdown')
     print(f"📍 Ubicación recibida: {user} - {lat},{lon}")
 
-@bot.message_handler(commands=['foto'])
-def solicitar_foto(message):
-    texto = """
-📸 *ENVIAR FOTO*
-
-Puedes enviar fotos para:
-- 📦 Acuse de recibo (entregas)
-- 🚨 Evidencia de incidentes  
-- 📊 Actualización de estatus
-
-*Cómo enviar:*
-1. Toca el clip 📎 
-2. "Galería" o "Cámara"
-3. Toma/selecciona foto
-4. Agrega descripción (opcional pero recomendado)
-
-💡 Para acuses: Incluye "entregado a [nombre]" en la descripción.
-    """
-    bot.reply_to(message, texto, parse_mode='Markdown')
-    print(f"📸 Foto: {message.from_user.first_name}")
+@bot.message_handler(content_types=['photo'])
+def manejar_foto(message):
+    user = message.from_user.first_name
+    user_id = message.from_user.id
+    file_id = message.photo[-1].file_id  # La foto de mayor calidad
+    caption = message.caption if message.caption else "Sin descripción"
+    
+    print(f"📸 Foto recibida de {user}: {caption}")
+    
+    # 🆕 PASO CRÍTICO: DESCARGAR FOTO REAL
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    ruta_foto_local = f"fotos_acuses/foto_{user_id}_{timestamp}.jpg"
+    
+    if descargar_foto_telegram(file_id, ruta_foto_local):
+        foto_para_sistema = ruta_foto_local  # Usar ruta local REAL
+        print(f"✅ Foto guardada en: {ruta_foto_local}")
+    else:
+        foto_para_sistema = f"file_id:{file_id}"  # Fallback
+        print("⚠️ Usando file_id como fallback")
+    
+    # Determinar tipo de foto y procesar
+    if any(word in caption.lower() for word in ['entregado', 'entregada', '✅', 'recibido']):
+        tipo = 'foto_acuse'
+        
+        # Intentar extraer nombre de persona automáticamente
+        persona_entregada = "Por determinar"
+        palabras = caption.split()
+        for i, palabra in enumerate(palabras):
+            if palabra.lower() in ['a', 'para', 'entregado', 'entregada'] and i + 1 < len(palabras):
+                persona_entregada = " ".join(palabras[i+1:])
+                break
+        
+        print(f"🎯 Detectada entrega a: {persona_entregada}")
+        
+        # Registrar en sistema automáticamente CON FOTO REAL
+        if user_id in RUTAS_ASIGNADAS:
+            if registrar_entrega_sistema(user_id, user, persona_entregada, ruta_foto_local, caption):
+                respuesta = f"📦 *ACUSE CON FOTO REGISTRADO* ¡Gracias {user}!\n\n✅ Entrega a *{persona_entregada}* registrada automáticamente.\n📸 Foto guardada en el sistema."
+            else:
+                respuesta = f"📸 *FOTO DE ACUSE RECIBIDA* ¡Gracias {user}!\n\n*Persona:* {persona_entregada}\n⚠️ *Error registrando en sistema*"
+        else:
+            respuesta = f"📸 *FOTO DE ACUSE RECIBIDA* ¡Gracias {user}!\n\n*Persona:* {persona_entregada}\nℹ️ *No tienes ruta activa asignada*"
+            
+    elif any(word in caption.lower() for word in ['retrasado', 'problema', '⏳', '🚨']):
+        tipo = 'foto_estatus'
+        respuesta = f"📊 *ESTATUS CON FOTO ACTUALIZADO* ¡Gracias {user}!\n\n📸 Foto de evidencia guardada en el sistema."
+    else:
+        tipo = 'foto_incidente'
+        respuesta = f"📸 *FOTO RECIBIDA* ¡Gracias {user}!\n\n📝 Descripción: {caption}\n📸 Foto guardada en el sistema."
+    
+    # Guardar en base de datos CON RUTA REAL
+    cursor.execute('INSERT INTO incidentes (user_id, user_name, tipo, descripcion, foto_id) VALUES (?, ?, ?, ?, ?)',
+                  (user_id, user, tipo, caption, ruta_foto_local))  # 🆕 Guardar ruta local REAL
+    conn.commit()
+    
+    bot.reply_to(message, respuesta, parse_mode='Markdown')
+    print(f"📸 Procesamiento completado: {user} - Tipo: {tipo}")
 
 @bot.message_handler(content_types=['photo'])
 def manejar_foto(message):
