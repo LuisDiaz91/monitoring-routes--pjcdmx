@@ -70,7 +70,23 @@ CREATE TABLE IF NOT EXISTS incidentes (
 )
 ''')
 conn.commit()
-print("🗃️ Base de datos lista")
+# 🆕 NUEVA TABLA PARA FOTOS PERSISTENTES
+cursor.execute('''
+CREATE TABLE IF NOT EXISTS fotos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    file_id TEXT UNIQUE,              -- ID único de Telegram
+    datos BLOB,                       -- Los bytes de la imagen (LA FOTO REAL)
+    user_id INTEGER,                  -- Quién envió la foto
+    user_name TEXT,                   -- Nombre del usuario
+    caption TEXT,                     -- Descripción/pie de foto
+    tipo TEXT,                        -- 'acuse', 'incidente', 'estatus'
+    ruta_id INTEGER,                  -- Ruta relacionada (si aplica)
+    persona_entregada TEXT,           -- Persona en la entrega (si aplica)
+    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+)
+''')
+conn.commit()
+print("✅ Tabla 'fotos' creada en base de datos")
 
 # SISTEMA DE RUTAS AUTOMÁTICO
 RUTAS_DISPONIBLES = []
