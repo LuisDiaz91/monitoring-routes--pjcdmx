@@ -7,14 +7,14 @@ import json
 import pandas as pd
 from telebot import types
 from datetime import datetime
-from flask import Flask, request, jsonify, Response  # 🆕 Response agregado
+from flask import Flask, request, jsonify, Response, send_file  # 🆕 send_file agregado
 import threading
 
 # 🆕 AGREGAR ESTA FUNCIÓN NUEVA - PEGALA AL PRINCIPIO DEL BOT
-def descargar_foto_telegram(file_id, ruta_destino):
-    """Descarga la foto real desde Telegram"""
+def descargar_foto_telegram(file_id, ruta_destino, tipo_foto="general"):
+    """Descarga la foto real desde Telegram y la guarda en carpeta correspondiente"""
     try:
-        print(f"🔄 Intentando descargar foto: {file_id}")
+        print(f"🔄 Intentando descargar foto: {file_id} - Tipo: {tipo_foto}")
         
         # 1. Obtener file_path del file_id
         file_info = bot.get_file(file_id)
@@ -25,21 +25,27 @@ def descargar_foto_telegram(file_id, ruta_destino):
         # 2. Descargar imagen
         response = requests.get(file_url, timeout=30)
         if response.status_code == 200:
-            # Asegurar que la carpeta existe
-            os.makedirs(os.path.dirname(ruta_destino), exist_ok=True)
+            # 🆕 Determinar carpeta según tipo
+            carpeta_tipo = f"carpeta_fotos_central/{tipo_foto}"
+            os.makedirs(carpeta_tipo, exist_ok=True)
             
-            with open(ruta_destino, 'wb') as f:
+            # 🆕 Generar nombre de archivo con timestamp
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            nombre_archivo = f"foto_{timestamp}.jpg"
+            ruta_final = f"{carpeta_tipo}/{nombre_archivo}"
+            
+            with open(ruta_final, 'wb') as f:
                 f.write(response.content)
             
-            print(f"✅ Foto descargada: {ruta_destino} ({len(response.content)} bytes)")
-            return True
+            print(f"✅ Foto descargada: {ruta_final} ({len(response.content)} bytes)")
+            return ruta_final  # 🆕 Devolver ruta real
         else:
             print(f"❌ Error HTTP: {response.status_code}")
             
     except Exception as e:
         print(f"❌ Error descargando foto: {str(e)}")
     
-    return False
+    return None
 
 # 🆕 AGREGA ESTA LÍNEA CRÍTICA
 app = Flask(__name__)
@@ -93,10 +99,20 @@ RUTAS_DISPONIBLES = []
 RUTAS_ASIGNADAS = {}  # user_id -> ruta_id
 ADMIN_IDS = [7800992671]  # ⚠️ CAMBIA POR TU USER_ID DE TELEGRAM
 
-# CREAR CARPETAS
-for carpeta in ['rutas_telegram', 'avances_ruta', 'incidencias_trafico', 'fotos_acuses', 'data']:
+# CREAR CARPETAS ORGANIZADAS
+carpetas = [
+    'carpeta_fotos_central/entregas',
+    'carpeta_fotos_central/incidentes', 
+    'carpeta_fotos_central/estatus',
+    'carpeta_fotos_central/general',
+    'rutas_telegram', 
+    'avances_ruta', 
+    'incidencias_trafico'
+]
+
+for carpeta in carpetas:
     os.makedirs(carpeta, exist_ok=True)
-print("📁 Carpetas del sistema creadas")
+print("📁 Carpetas organizadas creadas")
 
 # =============================================================================
 # FUNCIONES DEL SISTEMA DE RUTAS
@@ -561,56 +577,31 @@ def manejar_foto(message):
     
     print(f"📸 Foto recibida de {user}: {caption}")
     
-    # 🆕 PASO CRÍTICO: DESCARGAR FOTO REAL
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    ruta_foto_local = f"fotos_acuses/foto_{user_id}_{timestamp}.jpg"
+    # 🆕 DETERMINAR TIPO Y CARPETA
+    if any(word in caption.lower() for word in ['entregado', 'entregada', '✅', 'recibido']):
+        tipo = 'foto_acuse'
+        carpeta = 'entregas'
+    elif any(word in caption.lower() for word in ['retrasado', 'problema', '⏳', '🚨']):
+        tipo = 'foto_estatus' 
+        carpeta = 'estatus'
+    elif any(word in caption.lower() for word in ['incidente', 'tráfico', 'trafico', 'accidente']):
+        tipo = 'foto_incidente'
+        carpeta = 'incidentes'
+    else:
+        tipo = 'foto_general'
+        carpeta = 'general'
+    
+    # 🆕 DESCARGAR EN CARPETA CORRECTA
+    ruta_foto_local = descargar_foto_telegram(file_id, carpeta)
+    
+    if ruta_foto_local:
+        print(f"✅ Foto guardada en carpeta: {carpeta}")
+    else:
+        print("⚠️ Error descargando foto")
+        ruta_foto_local = f"file_id:{file_id}"  # Fallback
     
     # 🆕 VARIABLE PARA PERSONA ENTREGADA
     persona_entregada = "Por determinar"
-    
-    if descargar_foto_telegram(file_id, ruta_foto_local):
-        foto_para_sistema = ruta_foto_local  # Usar ruta local REAL
-        print(f"✅ Foto guardada en: {ruta_foto_local}")
-        
-        # 🆕 🆕 🆕 AGREGAR ESTO: GUARDAR EN BASE DE DATOS
-        try:
-            # Leer los bytes de la foto descargada
-            with open(ruta_foto_local, 'rb') as f:
-                foto_bytes = f.read()
-            
-            # Obtener ruta_id si tiene ruta asignada
-            ruta_id = RUTAS_ASIGNADAS.get(user_id)
-            
-            # Determinar persona_entregada automáticamente
-            if any(word in caption.lower() for word in ['entregado', 'entregada', '✅', 'recibido']):
-                palabras = caption.split()
-                for i, palabra in enumerate(palabras):
-                    if palabra.lower() in ['a', 'para', 'entregado', 'entregada'] and i + 1 < len(palabras):
-                        persona_entregada = " ".join(palabras[i+1:])
-                        break
-            
-            # Determinar tipo de foto
-            if any(word in caption.lower() for word in ['entregado', 'entregada', '✅', 'recibido']):
-                tipo = 'foto_acuse'
-            elif any(word in caption.lower() for word in ['retrasado', 'problema', '⏳', '🚨']):
-                tipo = 'foto_estatus'
-            else:
-                tipo = 'foto_incidente'
-            
-            # Guardar en tabla fotos
-            cursor.execute('''
-                INSERT INTO fotos (file_id, datos, user_id, user_name, caption, tipo, ruta_id, persona_entregada)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (file_id, foto_bytes, user_id, user, caption, tipo, ruta_id, persona_entregada))
-            conn.commit()
-            print(f"💾 Foto guardada en BD: {len(foto_bytes)} bytes - Tipo: {tipo}")
-            
-        except Exception as e:
-            print(f"⚠️ Error guardando foto en BD: {e}")
-        
-    else:
-        foto_para_sistema = f"file_id:{file_id}"  # Fallback
-        print("⚠️ Usando file_id como fallback")
     
     # Determinar tipo de foto y procesar (MANTIENE TU LÓGICA ORIGINAL)
     if any(word in caption.lower() for word in ['entregado', 'entregada', '✅', 'recibido']):
@@ -648,7 +639,7 @@ def manejar_foto(message):
     
     bot.reply_to(message, respuesta, parse_mode='Markdown')
     print(f"📸 Procesamiento completado: {user} - Tipo: {tipo}")
-
+    
 @bot.message_handler(commands=['atencionH', 'humano', 'soporte'])
 def solicitar_atencion_humana(message):
     user = message.from_user.first_name
@@ -984,6 +975,72 @@ def servir_foto_desde_bd(file_id):
             
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+@app.route('/galeria_carpetas')
+def galeria_carpetas():
+    """Página para navegar por las carpetas de fotos"""
+    html = """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>📸 Galería Organizada - PJCDMX</title>
+        <style>
+            body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }
+            .carpeta { background: white; padding: 20px; margin: 15px 0; border-radius: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+            .carpeta h2 { margin-top: 0; color: #333; }
+            .entregas { border-left: 5px solid #28a745; }
+            .incidentes { border-left: 5px solid #dc3545; }
+            .estatus { border-left: 5px solid #ffc107; }
+            .general { border-left: 5px solid #17a2b8; }
+            .fotos { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; }
+            .fotos img { max-width: 200px; border-radius: 5px; border: 1px solid #ddd; }
+            .vacío { color: #666; font-style: italic; }
+        </style>
+    </head>
+    <body>
+        <h1>📸 Galería Organizada de Fotos</h1>
+        <p>Sistema de Rutas PJCDMX - Fotos clasificadas automáticamente</p>
+    """
+    
+    carpetas = {
+        'entregas': '📦 Entregas y Acuses',
+        'incidentes': '🚨 Incidentes y Problemas', 
+        'estatus': '📊 Estatus y Actualizaciones',
+        'general': '📸 Fotos Generales'
+    }
+    
+    for carpeta, nombre in carpetas.items():
+        ruta_carpeta = f'carpeta_fotos_central/{carpeta}'
+        html += f'<div class="carpeta {carpeta}">'
+        html += f'<h2>{nombre}</h2>'
+        
+        if os.path.exists(ruta_carpeta):
+            fotos = os.listdir(ruta_carpeta)
+            if fotos:
+                html += f'<p><strong>{len(fotos)} fotos</strong></p>'
+                html += '<div class="fotos">'
+                for foto in fotos[:6]:  # Mostrar máximo 6
+                    html += f'<img src="/carpeta_fotos_central/{carpeta}/{foto}" alt="{foto}">'
+                if len(fotos) > 6:
+                    html += f'<p>... y {len(fotos) - 6} fotos más</p>'
+                html += '</div>'
+            else:
+                html += '<p class="vacío">No hay fotos en esta categoría</p>'
+        else:
+            html += '<p class="vacío">Carpeta no existe</p>'
+        
+        html += '</div>'
+    
+    html += "</body></html>"
+    return html
+
+@app.route('/carpeta_fotos_central/<path:filename>')
+def servir_foto_carpeta(filename):
+    """Servir fotos desde la carpeta central"""
+    try:
+        return send_file(f'carpeta_fotos_central/{filename}')
+    except Exception as e:
+        return f"Error cargando foto: {str(e)}", 404
 
 # CONFIGURACIÓN DE EJECUCIÓN MEJORADA - TODO INTEGRADO
 # =============================================================================
