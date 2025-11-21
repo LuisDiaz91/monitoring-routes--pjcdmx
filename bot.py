@@ -897,6 +897,81 @@ def set_webhook():
     except Exception as e:
         print(f"❌ Error configurando webhook: {e}")
         return False
+
+# =============================================================================
+# ENDPOINTS PARA BASE DE DATOS - AGREGAR ESTO
+# =============================================================================
+
+@app.route('/api/verificar_bd')
+def verificar_bd():
+    """Verificar que las tablas existen en la base de datos"""
+    try:
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        tablas = cursor.fetchall()
+        
+        # Contar registros en cada tabla
+        conteos = {}
+        for tabla in [t[0] for t in tablas]:
+            cursor.execute(f"SELECT COUNT(*) FROM {tabla}")
+            conteos[tabla] = cursor.fetchone()[0]
+            
+        return jsonify({
+            "status": "success",
+            "tablas": [t[0] for t in tablas],
+            "conteos": conteos,
+            "timestamp": datetime.now().isoformat()
+        })
+    except Exception as e:
+        return jsonify({"status": "error", "error": str(e)}), 500
+
+@app.route('/api/fotos_en_bd')
+def fotos_en_bd():
+    """Ver todas las fotos guardadas en la base de datos"""
+    try:
+        cursor.execute('''
+            SELECT file_id, user_name, caption, tipo, timestamp, LENGTH(datos) as tamaño_bytes 
+            FROM fotos 
+            ORDER BY timestamp DESC
+            LIMIT 10
+        ''')
+        fotos = cursor.fetchall()
+        
+        resultado = []
+        for foto in fotos:
+            resultado.append({
+                'file_id': foto[0],
+                'user_name': foto[1],
+                'caption': foto[2],
+                'tipo': foto[3],
+                'timestamp': foto[4],
+                'tamaño_bytes': foto[5]
+            })
+            
+        return jsonify({
+            "status": "success",
+            "total_fotos": len(resultado),
+            "fotos": resultado
+        })
+    except Exception as e:
+        return jsonify({"status": "error", "error": str(e)}), 500
+
+@app.route('/api/foto/<file_id>')
+def servir_foto_desde_bd(file_id):
+    """Servir una foto específica desde la base de datos"""
+    try:
+        cursor.execute('SELECT datos FROM fotos WHERE file_id = ?', (file_id,))
+        resultado = cursor.fetchone()
+        
+        if resultado:
+            datos_imagen = resultado[0]
+            print(f"📸 Sirviendo foto desde BD: {file_id} - {len(datos_imagen)} bytes")
+            return Response(datos_imagen, mimetype='image/jpeg')
+        else:
+            return jsonify({"error": f"Foto no encontrada en BD: {file_id}"}), 404
+            
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 # CONFIGURACIÓN DE EJECUCIÓN MEJORADA - TODO INTEGRADO
 # =============================================================================
 
