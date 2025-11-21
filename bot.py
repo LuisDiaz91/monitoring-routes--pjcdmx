@@ -565,19 +565,58 @@ def manejar_foto(message):
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     ruta_foto_local = f"fotos_acuses/foto_{user_id}_{timestamp}.jpg"
     
+    # 🆕 VARIABLE PARA PERSONA ENTREGADA
+    persona_entregada = "Por determinar"
+    
     if descargar_foto_telegram(file_id, ruta_foto_local):
         foto_para_sistema = ruta_foto_local  # Usar ruta local REAL
         print(f"✅ Foto guardada en: {ruta_foto_local}")
+        
+        # 🆕 🆕 🆕 AGREGAR ESTO: GUARDAR EN BASE DE DATOS
+        try:
+            # Leer los bytes de la foto descargada
+            with open(ruta_foto_local, 'rb') as f:
+                foto_bytes = f.read()
+            
+            # Obtener ruta_id si tiene ruta asignada
+            ruta_id = RUTAS_ASIGNADAS.get(user_id)
+            
+            # Determinar persona_entregada automáticamente
+            if any(word in caption.lower() for word in ['entregado', 'entregada', '✅', 'recibido']):
+                palabras = caption.split()
+                for i, palabra in enumerate(palabras):
+                    if palabra.lower() in ['a', 'para', 'entregado', 'entregada'] and i + 1 < len(palabras):
+                        persona_entregada = " ".join(palabras[i+1:])
+                        break
+            
+            # Determinar tipo de foto
+            if any(word in caption.lower() for word in ['entregado', 'entregada', '✅', 'recibido']):
+                tipo = 'foto_acuse'
+            elif any(word in caption.lower() for word in ['retrasado', 'problema', '⏳', '🚨']):
+                tipo = 'foto_estatus'
+            else:
+                tipo = 'foto_incidente'
+            
+            # Guardar en tabla fotos
+            cursor.execute('''
+                INSERT INTO fotos (file_id, datos, user_id, user_name, caption, tipo, ruta_id, persona_entregada)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (file_id, foto_bytes, user_id, user, caption, tipo, ruta_id, persona_entregada))
+            conn.commit()
+            print(f"💾 Foto guardada en BD: {len(foto_bytes)} bytes - Tipo: {tipo}")
+            
+        except Exception as e:
+            print(f"⚠️ Error guardando foto en BD: {e}")
+        
     else:
         foto_para_sistema = f"file_id:{file_id}"  # Fallback
         print("⚠️ Usando file_id como fallback")
     
-    # Determinar tipo de foto y procesar
+    # Determinar tipo de foto y procesar (MANTIENE TU LÓGICA ORIGINAL)
     if any(word in caption.lower() for word in ['entregado', 'entregada', '✅', 'recibido']):
         tipo = 'foto_acuse'
         
         # Intentar extraer nombre de persona automáticamente
-        persona_entregada = "Por determinar"
         palabras = caption.split()
         for i, palabra in enumerate(palabras):
             if palabra.lower() in ['a', 'para', 'entregado', 'entregada'] and i + 1 < len(palabras):
@@ -609,48 +648,6 @@ def manejar_foto(message):
     
     bot.reply_to(message, respuesta, parse_mode='Markdown')
     print(f"📸 Procesamiento completado: {user} - Tipo: {tipo}")
-
-@bot.message_handler(content_types=['photo'])
-def manejar_foto(message):
-    user = message.from_user.first_name
-    user_id = message.from_user.id
-    file_id = message.photo[-1].file_id
-    caption = message.caption if message.caption else "Sin descripción"
-    
-    # Determinar tipo de foto y procesar
-    if any(word in caption.lower() for word in ['entregado', 'entregada', '✅', 'recibido']):
-        tipo = 'foto_acuse'
-        # Intentar extraer nombre de persona para registro automático
-        persona_entregada = "Por determinar"
-        palabras = caption.split()
-        for i, palabra in enumerate(palabras):
-            if palabra.lower() in ['a', 'para', 'entregado', 'entregada'] and i + 1 < len(palabras):
-                persona_entregada = " ".join(palabras[i+1:])
-                break
-        
-        # Registrar en sistema automáticamente
-        if user_id in RUTAS_ASIGNADAS:
-            if registrar_entrega_sistema(user_id, user, persona_entregada, file_id, caption):
-                respuesta = f"📦 *ACUSE CON FOTO REGISTRADO* ¡Gracias {user}!\nEntrega a *{persona_entregada}* registrada automáticamente."
-            else:
-                respuesta = f"📸 *FOTO DE ACUSE RECIBIDA* ¡Gracias {user}!\n*Persona:* {persona_entregada}"
-        else:
-            respuesta = f"📸 *FOTO DE ACUSE RECIBIDA* ¡Gracias {user}!\n*Nota:* No tienes ruta activa asignada."
-            
-    elif any(word in caption.lower() for word in ['retrasado', 'problema', '⏳', '🚨']):
-        tipo = 'foto_estatus'
-        respuesta = f"📊 *ESTATUS CON FOTO ACTUALIZADO* ¡Gracias {user}! Foto de evidencia guardada."
-    else:
-        tipo = 'foto_incidente'
-        respuesta = f"📸 *FOTO RECIBIDA* ¡Gracias {user}! Foto guardada: {caption}"
-    
-    # Guardar en base de datos
-    cursor.execute('INSERT INTO incidentes (user_id, user_name, tipo, descripcion, foto_id) VALUES (?, ?, ?, ?, ?)',
-                  (user_id, user, tipo, caption, file_id))
-    conn.commit()
-    
-    bot.reply_to(message, respuesta, parse_mode='Markdown')
-    print(f"📸 Foto recibida: {user} - {caption} - Tipo: {tipo}")
 
 @bot.message_handler(commands=['atencionH', 'humano', 'soporte'])
 def solicitar_atencion_humana(message):
