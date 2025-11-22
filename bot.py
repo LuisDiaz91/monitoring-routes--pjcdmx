@@ -11,13 +11,17 @@ from flask import Flask, request, jsonify, Response, send_file  # 🆕 send_file
 import threading
 
 # 🆕 AGREGAR ESTA FUNCIÓN NUEVA - PEGALA AL PRINCIPIO DEL BOT
-def descargar_foto_telegram(file_id, ruta_destino, tipo_foto="general"):
+def descargar_foto_telegram(file_id, tipo_foto="general"):
     """Descarga la foto real desde Telegram y la guarda en carpeta correspondiente"""
     try:
         print(f"🔄 Intentando descargar foto: {file_id} - Tipo: {tipo_foto}")
         
         # 1. Obtener file_path del file_id
         file_info = bot.get_file(file_id)
+        if not file_info or not file_info.file_path:
+            print("❌ No se pudo obtener file_path de Telegram")
+            return None
+            
         file_url = f"https://api.telegram.org/file/bot{TOKEN}/{file_info.file_path}"
         
         print(f"📡 Descargando desde: {file_url}")
@@ -25,20 +29,20 @@ def descargar_foto_telegram(file_id, ruta_destino, tipo_foto="general"):
         # 2. Descargar imagen
         response = requests.get(file_url, timeout=30)
         if response.status_code == 200:
-            # 🆕 Determinar carpeta según tipo
+            # Determinar carpeta según tipo
             carpeta_tipo = f"carpeta_fotos_central/{tipo_foto}"
             os.makedirs(carpeta_tipo, exist_ok=True)
             
-            # 🆕 Generar nombre de archivo con timestamp
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            # Generar nombre de archivo con timestamp
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
             nombre_archivo = f"foto_{timestamp}.jpg"
             ruta_final = f"{carpeta_tipo}/{nombre_archivo}"
             
             with open(ruta_final, 'wb') as f:
                 f.write(response.content)
             
-            print(f"✅ Foto descargada: {ruta_final} ({len(response.content)} bytes)")
-            return ruta_final  # 🆕 Devolver ruta real
+            print(f"✅ Foto descargada en carpeta '{tipo_foto}': {ruta_final} ({len(response.content)} bytes)")
+            return ruta_final
         else:
             print(f"❌ Error HTTP: {response.status_code}")
             
@@ -46,6 +50,22 @@ def descargar_foto_telegram(file_id, ruta_destino, tipo_foto="general"):
         print(f"❌ Error descargando foto: {str(e)}")
     
     return None
+
+# ✈ Manejo de Base de Datos en Fotografia
+def guardar_foto_en_bd(file_id, user_id, user_name, caption, tipo, datos_imagen=None, ruta_local=None):
+    """Guardar foto en base de datos con todos los metadatos"""
+    try:
+        cursor.execute('''
+            INSERT OR REPLACE INTO fotos 
+            (file_id, user_id, user_name, caption, tipo, datos, ruta_local, timestamp)
+            VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        ''', (file_id, user_id, user_name, caption, tipo, datos_imagen, ruta_local))
+        conn.commit()
+        print(f"✅ Foto guardada en BD: {file_id} - Tipo: {tipo}")
+        return True
+    except Exception as e:
+        print(f"❌ Error guardando foto en BD: {e}")
+        return False
 
 # 🆕 AGREGA ESTA LÍNEA CRÍTICA
 app = Flask(__name__)
@@ -567,7 +587,7 @@ def manejar_ubicacion(message):
     
     bot.reply_to(message, respuesta, parse_mode='Markdown')
     print(f"📍 Ubicación recibida: {user} - {lat},{lon}")
-
+    
 @bot.message_handler(content_types=['photo'])
 def manejar_foto(message):
     user = message.from_user.first_name
@@ -577,7 +597,7 @@ def manejar_foto(message):
     
     print(f"📸 Foto recibida de {user}: {caption}")
     
-    # 🆕 DETERMINAR TIPO Y CARPETA
+    # 🆕 DETERMINAR TIPO Y CARPETA (SOLO UNA VEZ)
     if any(word in caption.lower() for word in ['entregado', 'entregada', '✅', 'recibido']):
         tipo = 'foto_acuse'
         carpeta = 'entregas'
@@ -590,20 +610,45 @@ def manejar_foto(message):
     else:
         tipo = 'foto_general'
         carpeta = 'general'
+
+    print(f"🎯 CLASIFICACIÓN: '{caption}' → Carpeta: {carpeta}, Tipo: {tipo}")
     
     # 🆕 DESCARGAR EN CARPETA CORRECTA
-    ruta_foto_local = descargar_foto_telegram(file_id, carpeta)
+    ruta_foto_local = descargar_foto_telegram(file_id, tipo_foto=carpeta)
     
+    # 🆕 GUARDAR EN BASE DE DATOS CON LA NUEVA FUNCIÓN
     if ruta_foto_local:
-        print(f"✅ Foto guardada en carpeta: {carpeta}")
+        # Leer los datos de la imagen para guardar en BD
+        with open(ruta_foto_local, 'rb') as f:
+            datos_imagen = f.read()
+        
+        # Guardar en base de datos
+        guardar_foto_en_bd(
+            file_id=file_id,
+            user_id=user_id,
+            user_name=user,
+            caption=caption,
+            tipo=tipo,
+            datos_imagen=datos_imagen,
+            ruta_local=ruta_foto_local
+        )
+        print(f"✅ Foto guardada en BD y carpeta: {carpeta}")
     else:
-        print("⚠️ Error descargando foto")
-        ruta_foto_local = f"file_id:{file_id}"  # Fallback
-    
+        print("⚠️ Error descargando foto, guardando solo referencia en BD")
+        guardar_foto_en_bd(
+            file_id=file_id,
+            user_id=user_id,
+            user_name=user,
+            caption=caption,
+            tipo=tipo,
+            datos_imagen=None,
+            ruta_local=None
+        )
+
     # 🆕 VARIABLE PARA PERSONA ENTREGADA
     persona_entregada = "Por determinar"
     
-    # Determinar tipo de foto y procesar (MANTIENE TU LÓGICA ORIGINAL)
+    # El resto de tu lógica original para procesar entregas...
     if any(word in caption.lower() for word in ['entregado', 'entregada', '✅', 'recibido']):
         tipo = 'foto_acuse'
         
@@ -632,9 +677,9 @@ def manejar_foto(message):
         tipo = 'foto_incidente'
         respuesta = f"📸 *FOTO RECIBIDA* ¡Gracias {user}!\n\n📝 Descripción: {caption}\n📸 Foto guardada en el sistema."
     
-    # Guardar en base de datos CON RUTA REAL
+    # Guardar en tabla incidentes también (mantener compatibilidad)
     cursor.execute('INSERT INTO incidentes (user_id, user_name, tipo, descripcion, foto_id) VALUES (?, ?, ?, ?, ?)',
-                  (user_id, user, tipo, caption, ruta_foto_local))  # 🆕 Guardar ruta local REAL
+                  (user_id, user, tipo, caption, ruta_foto_local))
     conn.commit()
     
     bot.reply_to(message, respuesta, parse_mode='Markdown')
@@ -760,22 +805,76 @@ def manejar_texto_general(message):
 # INICIALIZACIÓN Y EJECUCIÓN
 # =============================================================================
 
-def inicializar_sistema():
-    """Inicializar el sistema al arrancar"""
-    print("🔄 Inicializando sistema de rutas automáticas...")
-    cargar_rutas_disponibles()
-    print(f"✅ Sistema listo. Rutas disponibles: {len(RUTAS_DISPONIBLES)}")
-    print("🤖 Bot listo para recibir solicitudes de rutas")
+def inicializar_sistema_completo():
+    """Inicialización completa del sistema"""
+    print("🔄 Inicializando sistema completo PJCDMX...")
+    
+    # Crear todas las carpetas necesarias
+    carpetas_necesarias = [
+        'carpeta_fotos_central/entregas',
+        'carpeta_fotos_central/incidentes', 
+        'carpeta_fotos_central/estatus',
+        'carpeta_fotos_central/general',
+        'rutas_telegram', 
+        'avances_ruta', 
+        'incidencias_trafico'
+    ]
+    
+    for carpeta in carpetas_necesarias:
+        os.makedirs(carpeta, exist_ok=True)
+        print(f"📁 Carpeta creada/verificada: {carpeta}")
+    
+    # Cargar rutas disponibles
+    rutas_cargadas = cargar_rutas_disponibles()
+    
+    # Verificar conexión a base de datos
+    try:
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        tablas = cursor.fetchall()
+        print(f"✅ Base de datos: {len(tablas)} tablas verificadas")
+    except Exception as e:
+        print(f"❌ Error en base de datos: {e}")
+    
+    print(f"🎯 Sistema listo. Rutas disponibles: {rutas_cargadas}")
+    return True
 
 # =============================================================================
 # API PARA RECIBIR RUTAS DEL PROGRAMA GENERADOR
 # =============================================================================
 
-app = Flask(__name__)
-
 @app.route('/api/health', methods=['GET'])
-def health_check():
-    return jsonify({"status": "ok", "service": "bot_rutas_pjcdmx"})
+def health_check_detallado():
+    """Endpoint de salud completo"""
+    try:
+        # Verificar base de datos
+        cursor.execute("SELECT COUNT(*) FROM incidentes")
+        total_incidentes = cursor.fetchone()[0]
+        
+        cursor.execute("SELECT COUNT(*) FROM fotos") 
+        total_fotos = cursor.fetchone()[0]
+        
+        # Verificar archivos de rutas
+        total_rutas_archivo = len([f for f in os.listdir('rutas_telegram') if f.endswith('.json')]) if os.path.exists('rutas_telegram') else 0
+        
+        return jsonify({
+            "status": "healthy",
+            "service": "bot_rutas_pjcdmx",
+            "timestamp": datetime.now().isoformat(),
+            "estadisticas": {
+                "incidentes_en_bd": total_incidentes,
+                "fotos_en_bd": total_fotos,
+                "rutas_en_sistema": total_rutas_archivo,
+                "rutas_disponibles": len(RUTAS_DISPONIBLES),
+                "repartidores_activos": len(RUTAS_ASIGNADAS)
+            },
+            "carpetas": {
+                "existe_rutas_telegram": os.path.exists('rutas_telegram'),
+                "existe_fotos_central": os.path.exists('carpeta_fotos_central'),
+                "existe_avances_ruta": os.path.exists('avances_ruta')
+            }
+        })
+    except Exception as e:
+        return jsonify({"status": "error", "error": str(e)}), 500
 
 @app.route('/api/rutas', methods=['POST'])
 def recibir_rutas_desde_programa():
@@ -1048,13 +1147,26 @@ def servir_foto_carpeta(filename):
 print("\n🎯 SISTEMA AUTOMÁTICO DE RUTAS PJCDMX - 100% OPERATIVO")
 print("📱 Comandos: /solicitar_ruta, /miruta, /entregar, /estado_rutas")
 
-inicializar_sistema()
+inicializar_sistema_completo()
 
-# 🆕 VUELVE A AGREGAR ESTO PARA MANTENER LA APLICACIÓN EJECUTÁNDOSE
+# =============================================================================
+# EJECUCIÓN PRINCIPAL DEL SISTEMA
+# =============================================================================
+
 if __name__ == "__main__":
-    port = int(os.environ.get('PORT', 8080))
-    print(f"🚀 Iniciando servidor en puerto: {port}")
-    app.run(host='0.0.0.0', port=port, debug=False, threaded=True)
+    # Inicialización completa
+    if inicializar_sistema_completo():
+        print("🤖 BOT PJCDMX INICIADO CORRECTAMENTE")
+        
+        # Configurar webhook para producción
+        if os.environ.get('RAILWAY_ENVIRONMENT'):
+            set_webhook()
+        
+        # Iniciar servidor
+        port = int(os.environ.get('PORT', 8080))
+        app.run(host='0.0.0.0', port=port, debug=False)
+    else:
+        print("❌ ERROR: No se pudo inicializar el sistema")
 
 # Railway usará Gunicorn via Procfile, no ejecutamos app.run() aquí
 
