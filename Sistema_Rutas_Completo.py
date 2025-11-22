@@ -617,40 +617,40 @@ class CoreRouteGenerator:
         except Exception as e:
             self._log(f"Error generating map: {str(e)}")
             
-        # GENERAR DATOS PARA TELEGRAM
-        waypoints = "|".join([f"{lat},{lng}" for lat, lng in coords_opt])
-        google_maps_url = f"https://www.google.com/maps/dir/{self.origen_coords}/{waypoints}"
-        
-        ruta_telegram = {
-            'ruta_id': ruta_id,
-            'zona': zona,
-            'repartidor_asignado': None,
-            'google_maps_url': google_maps_url,
-            'paradas': [
-                {
-                    'orden': i,
-                    'nombre': str(fila.get('NOMBRE', 'N/A')).split(',')[0].strip(),
-                    'direccion': str(fila.get('DIRECCIÓN', 'N/A')).strip(),
-                    'dependencia': str(fila.get('ADSCRIPCIÓN', 'N/A')).strip(),
-                    'coords': f"{coord[0]},{coord[1]}",
-                    'estado': 'pendiente',
-                    'timestamp_entrega': None,
-                    'foto_acuse': None
-                }
-                for i, (fila, coord) in enumerate(zip(filas_opt, coords_opt), 1)
-            ],
-            'estadisticas': {
-                'total_paradas': len(filas_opt),
-                'distancia_km': round(dist, 1),
-                'tiempo_min': round(tiempo),
-                'origen': self.origen_name
-            },
+# GENERAR DATOS PARA TELEGRAM
+waypoints_param = "|".join([f"{lat},{lng}" for lat, lng in coords_opt])
+google_maps_url = f"https://www.google.com/maps/dir/?api=1&origin={self.origen_coords}&destination={self.origen_coords}&waypoints={waypoints_param}&travelmode=driving"
+
+ruta_telegram = {
+    'ruta_id': ruta_id,
+    'zona': zona,
+    'repartidor_asignado': None,
+    'google_maps_url': google_maps_url,
+    'paradas': [
+        {
+            'orden': i,
+            'nombre': str(fila.get('NOMBRE', 'N/A')).split(',')[0].strip(),
+            'direccion': str(fila.get('DIRECCIÓN', 'N/A')).strip(),
+            'dependencia': str(fila.get('ADSCRIPCIÓN', 'N/A')).strip(),
+            'coords': f"{coord[0]},{coord[1]}",
             'estado': 'pendiente',
-            'fotos_acuses': [],
-            'timestamp_creacion': datetime.now().isoformat(),
-            'excel_original': excel_file,
-            'indices_originales': indices
+            'timestamp_entrega': None,
+            'foto_acuse': None
         }
+        for i, (fila, coord) in enumerate(zip(filas_opt, coords_opt), 1)
+    ],
+    'estadisticas': {
+        'total_paradas': len(filas_opt),
+        'distancia_km': round(dist, 1),
+        'tiempo_min': round(tiempo),
+        'origen': self.origen_name
+    },
+    'estado': 'pendiente',
+    'fotos_acuses': [],
+    'timestamp_creacion': datetime.now().isoformat(),
+    'excel_original': excel_file,
+    'indices_originales': indices
+}
         
         telegram_file = f"rutas_telegram/Ruta_{ruta_id}_{zona}.json"
         try:
