@@ -67,6 +67,80 @@ def guardar_foto_en_bd(file_id, user_id, user_name, caption, tipo, datos_imagen=
         print(f"❌ Error guardando foto en BD: {e}")
         return False
 
+def actualizar_excel_desde_bot(datos_entrega):
+    """Función CRÍTICA que actualiza el Excel automáticamente cuando el bot recibe entregas"""
+    try:
+        print(f"🔄 ACTUALIZANDO EXCEL DESDE BOT: {datos_entrega.get('persona_entregada')}")
+        
+        ruta_id = datos_entrega.get('ruta_id')
+        persona_entregada = datos_entrega.get('persona_entregada')
+        foto_ruta = datos_entrega.get('foto_local') or datos_entrega.get('foto_acuse', '')
+        repartidor = datos_entrega.get('repartidor', '')
+        timestamp = datos_entrega.get('timestamp', '')
+        
+        # Buscar archivo de ruta correspondiente
+        archivos_ruta = [f for f in os.listdir('rutas_telegram') 
+                       if f.startswith(f'Ruta_{ruta_id}_')]
+        
+        if not archivos_ruta:
+            print(f"❌ No se encontró archivo de ruta para Ruta_{ruta_id}")
+            return False
+            
+        with open(f'rutas_telegram/{archivos_ruta[0]}', 'r', encoding='utf-8') as f:
+            ruta_data = json.load(f)
+        
+        excel_file = ruta_data.get('excel_original')
+        if not excel_file or not os.path.exists(excel_file):
+            print(f"❌ Archivo Excel no encontrado: {excel_file}")
+            return False
+        
+        # Leer y actualizar Excel - ESTO ES LO MÁS IMPORTANTE
+        df = pd.read_excel(excel_file)
+        
+        persona_encontrada = False
+        for idx, fila in df.iterrows():
+            nombre_celda = str(fila.get('Nombre', '')).strip().lower()
+            persona_buscar = persona_entregada.strip().lower()
+            
+            # Búsqueda flexible
+            if (persona_buscar in nombre_celda or 
+                nombre_celda in persona_buscar or
+                any(palabra in nombre_celda for palabra in persona_buscar.split())):
+                
+                # 🎯 ACTUALIZACIÓN AUTOMÁTICA DEL EXCEL
+                df.at[idx, 'Acuse'] = f"✅ ENTREGADO - {timestamp}"
+                df.at[idx, 'Repartidor'] = repartidor
+                df.at[idx, 'Foto_Acuse'] = foto_ruta
+                df.at[idx, 'Timestamp_Entrega'] = timestamp
+                df.at[idx, 'Estado'] = 'ENTREGADO'
+                
+                persona_encontrada = True
+                print(f"✅ Excel actualizado para: {persona_entregada}")
+                break
+        
+        if not persona_encontrada:
+            print(f"⚠️ Persona no encontrada en Excel: {persona_entregada}")
+            # Agregar como nueva fila
+            nueva_fila = {
+                'Nombre': persona_entregada,
+                'Acuse': f"✅ ENTREGADO - {timestamp}",
+                'Repartidor': repartidor,
+                'Foto_Acuse': foto_ruta,
+                'Timestamp_Entrega': timestamp,
+                'Estado': 'ENTREGADO'
+            }
+            df = pd.concat([df, pd.DataFrame([nueva_fila])], ignore_index=True)
+            print(f"📝 Nueva fila agregada para: {persona_entregada}")
+        
+        # Guardar Excel actualizado
+        df.to_excel(excel_file, index=False)
+        print(f"💾 Excel actualizado automáticamente: {os.path.basename(excel_file)}")
+        return True
+        
+    except Exception as e:
+        print(f"❌ Error crítico actualizando Excel desde bot: {str(e)}")
+        return False
+
 # 🆕 AGREGA ESTA LÍNEA CRÍTICA
 app = Flask(__name__)
 
@@ -682,6 +756,24 @@ def manejar_foto(message):
                   (user_id, user, tipo, caption, ruta_foto_local))
     conn.commit()
     
+    # 🆕 🎯 ACTUALIZACIÓN AUTOMÁTICA DEL EXCEL - AGREGAR ESTO
+    if any(word in caption.lower() for word in ['entregado', 'entregada', '✅', 'recibido']):
+        # Crear datos para actualizar Excel
+        datos_entrega_excel = {
+            'ruta_id': RUTAS_ASIGNADAS.get(user_id) if user_id in RUTAS_ASIGNADAS else 'desconocido',
+            'repartidor': user,
+            'persona_entregada': persona_entregada,
+            'foto_local': ruta_foto_local,
+            'foto_acuse': file_id,
+            'timestamp': datetime.now().isoformat(),
+            'user_id': user_id
+        }
+        
+        # 🎯 LLAMAR A LA ACTUALIZACIÓN AUTOMÁTICA DEL EXCEL
+        threading.Thread(target=actualizar_excel_desde_bot, args=(datos_entrega_excel,)).start()
+        print(f"🚀 Iniciando actualización automática de Excel para: {persona_entregada}")
+    
+    # Respuesta al usuario (esto ya existe) - SOLO UN bot.reply_to
     bot.reply_to(message, respuesta, parse_mode='Markdown')
     print(f"📸 Procesamiento completado: {user} - Tipo: {tipo}")
     
@@ -1140,6 +1232,42 @@ def servir_foto_carpeta(filename):
         return send_file(f'carpeta_fotos_central/{filename}')
     except Exception as e:
         return f"Error cargando foto: {str(e)}", 404
+
+@app.route('/carpeta_fotos_central/<path:filename>')
+def servir_foto_carpeta(filename):
+    """Servir fotos desde la carpeta central"""
+    try:
+        return send_file(f'carpeta_fotos_central/{filename}')
+    except Exception as e:
+        return f"Error cargando foto: {str(e)}", 404
+
+# 🆕 🎯 =============================================================================
+# ENDPOINT PARA SINCRONIZACIÓN AUTOMÁTICA DE EXCEL
+# =============================================================================
+
+@app.route('/api/forzar_actualizacion_excel', methods=['POST'])
+def forzar_actualizacion_excel():
+    """Endpoint para forzar la actualización de todos los Excel con las fotos"""
+    try:
+        actualizaciones = 0
+        
+        # Buscar todas las entregas en avances_ruta
+        for archivo in os.listdir('avances_ruta'):
+            if archivo.endswith('.json'):
+                with open(f'avances_ruta/{archivo}', 'r') as f:
+                    datos_entrega = json.load(f)
+                
+                if actualizar_excel_desde_bot(datos_entrega):
+                    actualizaciones += 1
+        
+        return jsonify({
+            "status": "success",
+            "actualizaciones": actualizaciones,
+            "message": f"Se actualizaron {actualizaciones} archivos Excel"
+        })
+        
+    except Exception as e:
+        return jsonify({"status": "error", "error": str(e)}), 500
 
 # CONFIGURACIÓN DE EJECUCIÓN MEJORADA - TODO INTEGRADO
 # =============================================================================
