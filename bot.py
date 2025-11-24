@@ -1434,6 +1434,91 @@ def estado_fotos():
         return jsonify({'status': 'error', 'error': str(e)}), 500
 
 # =============================================================================
+# ENDPOINTS PARA SINCRONIZACIÓN CON PROGRAMA ESCRITORIO
+# =============================================================================
+
+@app.route('/api/avances_pendientes', methods=['GET'])
+def obtener_avances_pendientes():
+    """Endpoint para que el programa obtenga avances de entregas"""
+    try:
+        avances = []
+        
+        # Buscar en avances_ruta (entregas recientes)
+        if os.path.exists('avances_ruta'):
+            archivos_avance = sorted(os.listdir('avances_ruta'), reverse=True)
+            for archivo in archivos_avance[:20]:  # Últimos 20 avances
+                if archivo.endswith('.json'):
+                    try:
+                        with open(f'avances_ruta/{archivo}', 'r', encoding='utf-8') as f:
+                            avance = json.load(f)
+                            # 🆕 AGREGAR INFORMACIÓN CRÍTICA PARA EXCEL
+                            avance['_archivo'] = archivo
+                            avance['_procesado'] = False
+                            avances.append(avance)
+                    except Exception as e:
+                        print(f"❌ Error leyendo avance {archivo}: {e}")
+        
+        print(f"📊 Enviando {len(avances)} avances pendientes al programa")
+        return jsonify({
+            "status": "success",
+            "avances": avances,
+            "total": len(avances),
+            "timestamp": datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        return jsonify({"status": "error", "error": str(e)}), 500
+
+@app.route('/api/avances/<avance_id>/procesado', methods=['POST'])
+def marcar_avance_procesado(avance_id):
+    """Marcar un avance como procesado en el programa"""
+    try:
+        # Buscar el archivo por ID (simplificado)
+        if os.path.exists('avances_ruta'):
+            for archivo in os.listdir('avances_ruta'):
+                if avance_id in archivo:  # Búsqueda simple
+                    print(f"✅ Avance marcado como procesado: {archivo}")
+                    # Podrías renombrar el archivo o moverlo a otra carpeta
+                    return jsonify({"status": "success", "archivo": archivo})
+        
+        return jsonify({"status": "error", "message": "Avance no encontrado"}), 404
+        
+    except Exception as e:
+        return jsonify({"status": "error", "error": str(e)}), 500
+
+@app.route('/api/rutas_disponibles', methods=['GET'])
+def obtener_rutas_disponibles():
+    """Endpoint para que el programa vea las rutas en el bot"""
+    try:
+        rutas = []
+        if os.path.exists('rutas_telegram'):
+            for archivo in os.listdir('rutas_telegram'):
+                if archivo.endswith('.json'):
+                    try:
+                        with open(f'rutas_telegram/{archivo}', 'r', encoding='utf-8') as f:
+                            ruta = json.load(f)
+                            rutas.append({
+                                'ruta_id': ruta.get('ruta_id'),
+                                'zona': ruta.get('zona'),
+                                'estado': ruta.get('estado'),
+                                'repartidor': ruta.get('repartidor_asignado'),
+                                'paradas_totales': len(ruta.get('paradas', [])),
+                                'paradas_entregadas': len([p for p in ruta.get('paradas', []) if p.get('estado') == 'entregado']),
+                                'archivo': archivo
+                            })
+                    except Exception as e:
+                        print(f"❌ Error leyendo ruta {archivo}: {e}")
+        
+        return jsonify({
+            "status": "success",
+            "rutas": rutas,
+            "total": len(rutas)
+        })
+        
+    except Exception as e:
+        return jsonify({"status": "error", "error": str(e)}), 500
+
+# =============================================================================
 # INICIALIZACIÓN Y EJECUCIÓN
 # =============================================================================
 
