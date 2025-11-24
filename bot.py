@@ -7,33 +7,117 @@ import json
 import pandas as pd
 from telebot import types
 from datetime import datetime
-from flask import Flask, request, jsonify, Response, send_file  # 🆕 send_file agregado
+from flask import Flask, request, jsonify, Response, send_file
 import threading
+import traceback
+from functools import wraps
 
-# 🆕 AGREGAR ESTA FUNCIÓN NUEVA - PEGALA AL PRINCIPIO DEL BOT
+# =============================================================================
+# CONFIGURACIÓN INICIAL
+# =============================================================================
+
+print("🚀 INICIANDO BOT COMPLETO PJCDMX - SISTEMA AUTOMÁTICO DE RUTAS...")
+
+# CONFIGURACIÓN SEGURA
+TOKEN = os.environ.get("BOT_TOKEN")
+if not TOKEN:
+    print("❌ ERROR: BOT_TOKEN no configurado en Railway")
+    exit(1)
+
+bot = telebot.TeleBot(TOKEN)
+app = Flask(__name__)
+
+# =============================================================================
+# DECORATOR PARA MANEJO DE ERRORES GLOBAL
+# =============================================================================
+
+def manejar_errores_telegram(f):
+    """Decorator para manejar errores en handlers de Telegram"""
+    @wraps(f)
+    def decorated_function(update, context):
+        try:
+            return f(update, context)
+        except Exception as e:
+            error_msg = f"❌ Error en {f.__name__}: {str(e)}"
+            print(error_msg)
+            traceback.print_exc()
+            
+            # Intentar notificar al usuario
+            try:
+                update.message.reply_text("⚠️ Ocurrió un error. Por favor, intenta nuevamente.")
+            except:
+                pass
+    return decorated_function
+
+# =============================================================================
+# CONFIGURACIÓN BASE DE DATOS
+# =============================================================================
+
+conn = sqlite3.connect('/tmp/incidentes.db', check_same_thread=False)
+cursor = conn.cursor()
+
+# Tabla de incidentes
+cursor.execute('''
+CREATE TABLE IF NOT EXISTS incidentes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
+    user_name TEXT,
+    tipo TEXT,
+    descripcion TEXT,
+    foto_id TEXT,
+    ubicacion TEXT,
+    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+)
+''')
+
+# Tabla de fotos
+cursor.execute('''
+CREATE TABLE IF NOT EXISTS fotos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    file_id TEXT UNIQUE,
+    datos BLOB,
+    user_id INTEGER,
+    user_name TEXT,
+    caption TEXT,
+    tipo TEXT,
+    ruta_id INTEGER,
+    persona_entregada TEXT,
+    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+)
+''')
+conn.commit()
+print("✅ Base de datos inicializada")
+
+# =============================================================================
+# VARIABLES GLOBALES DEL SISTEMA
+# =============================================================================
+
+RUTAS_DISPONIBLES = []
+RUTAS_ASIGNADAS = {}
+ADMIN_IDS = [7800992671]  # ⚠️ CAMBIA POR TU USER_ID
+
+# =============================================================================
+# FUNCIONES AUXILIARES
+# =============================================================================
+
 def descargar_foto_telegram(file_id, tipo_foto="general"):
     """Descarga la foto real desde Telegram y la guarda en carpeta correspondiente"""
     try:
         print(f"🔄 Intentando descargar foto: {file_id} - Tipo: {tipo_foto}")
         
-        # 1. Obtener file_path del file_id
         file_info = bot.get_file(file_id)
         if not file_info or not file_info.file_path:
             print("❌ No se pudo obtener file_path de Telegram")
             return None
             
         file_url = f"https://api.telegram.org/file/bot{TOKEN}/{file_info.file_path}"
-        
         print(f"📡 Descargando desde: {file_url}")
         
-        # 2. Descargar imagen
         response = requests.get(file_url, timeout=30)
         if response.status_code == 200:
-            # Determinar carpeta según tipo
             carpeta_tipo = f"carpeta_fotos_central/{tipo_foto}"
             os.makedirs(carpeta_tipo, exist_ok=True)
             
-            # Generar nombre de archivo con timestamp
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
             nombre_archivo = f"foto_{timestamp}.jpg"
             ruta_final = f"{carpeta_tipo}/{nombre_archivo}"
@@ -41,7 +125,7 @@ def descargar_foto_telegram(file_id, tipo_foto="general"):
             with open(ruta_final, 'wb') as f:
                 f.write(response.content)
             
-            print(f"✅ Foto descargada en carpeta '{tipo_foto}': {ruta_final} ({len(response.content)} bytes)")
+            print(f"✅ Foto descargada: {ruta_final} ({len(response.content)} bytes)")
             return ruta_final
         else:
             print(f"❌ Error HTTP: {response.status_code}")
@@ -51,9 +135,8 @@ def descargar_foto_telegram(file_id, tipo_foto="general"):
     
     return None
 
-# ✈ Manejo de Base de Datos en Fotografia
 def guardar_foto_en_bd(file_id, user_id, user_name, caption, tipo, datos_imagen=None, ruta_local=None):
-    """Guardar foto en base de datos con todos los metadatos"""
+    """Guardar foto en base de datos con metadatos"""
     try:
         cursor.execute('''
             INSERT OR REPLACE INTO fotos 
@@ -68,9 +151,9 @@ def guardar_foto_en_bd(file_id, user_id, user_name, caption, tipo, datos_imagen=
         return False
 
 def actualizar_excel_desde_bot(datos_entrega):
-    """Función CRÍTICA que actualiza el Excel automáticamente cuando el bot recibe entregas"""
+    """Actualiza el Excel automáticamente cuando el bot recibe entregas"""
     try:
-        print(f"🔄 ACTUALIZANDO EXCEL DESDE BOT: {datos_entrega.get('persona_entregada')}")
+        print(f"🔄 ACTUALIZANDO EXCEL: {datos_entrega.get('persona_entregada')}")
         
         ruta_id = datos_entrega.get('ruta_id')
         persona_entregada = datos_entrega.get('persona_entregada')
@@ -78,12 +161,12 @@ def actualizar_excel_desde_bot(datos_entrega):
         repartidor = datos_entrega.get('repartidor', '')
         timestamp = datos_entrega.get('timestamp', '')
         
-        # Buscar archivo de ruta correspondiente
+        # Buscar archivo de ruta
         archivos_ruta = [f for f in os.listdir('rutas_telegram') 
                        if f.startswith(f'Ruta_{ruta_id}_')]
         
         if not archivos_ruta:
-            print(f"❌ No se encontró archivo de ruta para Ruta_{ruta_id}")
+            print(f"❌ No se encontró archivo para Ruta_{ruta_id}")
             return False
             
         with open(f'rutas_telegram/{archivos_ruta[0]}', 'r', encoding='utf-8') as f:
@@ -91,13 +174,13 @@ def actualizar_excel_desde_bot(datos_entrega):
         
         excel_file = ruta_data.get('excel_original')
         if not excel_file or not os.path.exists(excel_file):
-            print(f"❌ Archivo Excel no encontrado: {excel_file}")
+            print(f"❌ Excel no encontrado: {excel_file}")
             return False
         
-        # Leer y actualizar Excel - ESTO ES LO MÁS IMPORTANTE
+        # Leer y actualizar Excel
         df = pd.read_excel(excel_file)
-        
         persona_encontrada = False
+        
         for idx, fila in df.iterrows():
             nombre_celda = str(fila.get('Nombre', '')).strip().lower()
             persona_buscar = persona_entregada.strip().lower()
@@ -107,7 +190,6 @@ def actualizar_excel_desde_bot(datos_entrega):
                 nombre_celda in persona_buscar or
                 any(palabra in nombre_celda for palabra in persona_buscar.split())):
                 
-                # 🎯 ACTUALIZACIÓN AUTOMÁTICA DEL EXCEL
                 df.at[idx, 'Acuse'] = f"✅ ENTREGADO - {timestamp}"
                 df.at[idx, 'Repartidor'] = repartidor
                 df.at[idx, 'Foto_Acuse'] = foto_ruta
@@ -115,12 +197,11 @@ def actualizar_excel_desde_bot(datos_entrega):
                 df.at[idx, 'Estado'] = 'ENTREGADO'
                 
                 persona_encontrada = True
-                print(f"✅ Excel actualizado para: {persona_entregada}")
+                print(f"✅ Excel actualizado: {persona_entregada}")
                 break
         
         if not persona_encontrada:
-            print(f"⚠️ Persona no encontrada en Excel: {persona_entregada}")
-            # Agregar como nueva fila
+            print(f"⚠️ Persona no encontrada: {persona_entregada}")
             nueva_fila = {
                 'Nombre': persona_entregada,
                 'Acuse': f"✅ ENTREGADO - {timestamp}",
@@ -130,90 +211,18 @@ def actualizar_excel_desde_bot(datos_entrega):
                 'Estado': 'ENTREGADO'
             }
             df = pd.concat([df, pd.DataFrame([nueva_fila])], ignore_index=True)
-            print(f"📝 Nueva fila agregada para: {persona_entregada}")
+            print(f"📝 Nueva fila agregada: {persona_entregada}")
         
-        # Guardar Excel actualizado
         df.to_excel(excel_file, index=False)
-        print(f"💾 Excel actualizado automáticamente: {os.path.basename(excel_file)}")
+        print(f"💾 Excel actualizado: {os.path.basename(excel_file)}")
         return True
         
     except Exception as e:
-        print(f"❌ Error crítico actualizando Excel desde bot: {str(e)}")
+        print(f"❌ Error actualizando Excel: {str(e)}")
         return False
 
-# 🆕 AGREGA ESTA LÍNEA CRÍTICA
-app = Flask(__name__)
-
-print("🚀 INICIANDO BOT COMPLETO PJCDMX - SISTEMA AUTOMÁTICO DE RUTAS...")
-
-# CONFIGURACIÓN SEGURA
-TOKEN = os.environ.get("BOT_TOKEN")
-if not TOKEN:
-    print("❌ ERROR: BOT_TOKEN no configurado en Railway")
-    exit(1)
-
-bot = telebot.TeleBot(TOKEN)
-
-# BASE DE DATOS
-conn = sqlite3.connect('/tmp/incidentes.db', check_same_thread=False)
-cursor = conn.cursor()
-cursor.execute('''
-CREATE TABLE IF NOT EXISTS incidentes (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER,
-    user_name TEXT,
-    tipo TEXT,
-    descripcion TEXT,
-    foto_id TEXT,
-    ubicacion TEXT,
-    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-)
-''')
-conn.commit()
-# 🆕 NUEVA TABLA PARA FOTOS PERSISTENTES
-cursor.execute('''
-CREATE TABLE IF NOT EXISTS fotos (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    file_id TEXT UNIQUE,              -- ID único de Telegram
-    datos BLOB,                       -- Los bytes de la imagen (LA FOTO REAL)
-    user_id INTEGER,                  -- Quién envió la foto
-    user_name TEXT,                   -- Nombre del usuario
-    caption TEXT,                     -- Descripción/pie de foto
-    tipo TEXT,                        -- 'acuse', 'incidente', 'estatus'
-    ruta_id INTEGER,                  -- Ruta relacionada (si aplica)
-    persona_entregada TEXT,           -- Persona en la entrega (si aplica)
-    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-)
-''')
-conn.commit()
-print("✅ Tabla 'fotos' creada en base de datos")
-
-# SISTEMA DE RUTAS AUTOMÁTICO
-RUTAS_DISPONIBLES = []
-RUTAS_ASIGNADAS = {}  # user_id -> ruta_id
-ADMIN_IDS = [7800992671]  # ⚠️ CAMBIA POR TU USER_ID DE TELEGRAM
-
-# CREAR CARPETAS ORGANIZADAS
-carpetas = [
-    'carpeta_fotos_central/entregas',
-    'carpeta_fotos_central/incidentes', 
-    'carpeta_fotos_central/estatus',
-    'carpeta_fotos_central/general',
-    'rutas_telegram', 
-    'avances_ruta', 
-    'incidencias_trafico'
-]
-
-for carpeta in carpetas:
-    os.makedirs(carpeta, exist_ok=True)
-print("📁 Carpetas organizadas creadas")
-
-# =============================================================================
-# FUNCIONES DEL SISTEMA DE RUTAS
-# =============================================================================
-
 def cargar_rutas_disponibles():
-    """Cargar todas las rutas disponibles para asignación automática"""
+    """Cargar rutas disponibles para asignación automática"""
     global RUTAS_DISPONIBLES
     RUTAS_DISPONIBLES = []
     
@@ -239,12 +248,11 @@ def formatear_ruta_para_repartidor(ruta):
     texto += f"*Distancia:* {ruta['estadisticas']['distancia_km']} km\n"
     texto += f"*Tiempo estimado:* {ruta['estadisticas']['tiempo_min']} min\n\n"
     
-    # Mostrar progreso
     entregadas = len([p for p in ruta['paradas'] if p.get('estado') == 'entregado'])
     texto += f"*Progreso:* {entregadas}/{len(ruta['paradas'])} entregadas\n\n"
     
     texto += "*📍 PARADAS:*\n"
-    for parada in ruta['paradas'][:5]:  # Mostrar máximo 5
+    for parada in ruta['paradas'][:5]:
         estado = "✅" if parada.get('estado') == 'entregado' else "⏳"
         texto += f"{estado} *{parada['orden']}. {parada['nombre']}*\n"
         texto += f"   🏢 {parada['dependencia']}\n"
@@ -271,13 +279,11 @@ def registrar_entrega_sistema(user_id, user_name, persona_entregada, foto_id=Non
         ruta_id = RUTAS_ASIGNADAS[user_id]
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         
-        # Buscar archivo de la ruta
         for archivo in os.listdir('rutas_telegram'):
             if f"Ruta_{ruta_id}_" in archivo:
                 with open(f'rutas_telegram/{archivo}', 'r', encoding='utf-8') as f:
                     ruta_data = json.load(f)
                 
-                # Actualizar parada
                 for parada in ruta_data['paradas']:
                     if persona_entregada.lower() in parada['nombre'].lower():
                         parada['estado'] = 'entregado'
@@ -286,17 +292,14 @@ def registrar_entrega_sistema(user_id, user_name, persona_entregada, foto_id=Non
                         parada['comentarios'] = comentarios
                         break
                 
-                # Verificar si todas están entregadas
                 pendientes = [p for p in ruta_data['paradas'] if p.get('estado') != 'entregado']
                 if not pendientes:
                     ruta_data['estado'] = 'completada'
                     ruta_data['timestamp_completada'] = timestamp
                 
-                # Guardar cambios
                 with open(f'rutas_telegram/{archivo}', 'w', encoding='utf-8') as f:
                     json.dump(ruta_data, f, indent=2, ensure_ascii=False)
                 
-                # Guardar avance
                 avance = {
                     'ruta_id': ruta_id,
                     'repartidor': user_name,
@@ -319,10 +322,81 @@ def registrar_entrega_sistema(user_id, user_name, persona_entregada, foto_id=Non
     
     return False
 
+def inicializar_sistema_completo():
+    """Inicialización completa del sistema"""
+    print("🔄 Inicializando sistema completo PJCDMX...")
+    
+    carpetas_necesarias = [
+        'carpeta_fotos_central/entregas',
+        'carpeta_fotos_central/incidentes', 
+        'carpeta_fotos_central/estatus',
+        'carpeta_fotos_central/general',
+        'rutas_telegram', 
+        'avances_ruta', 
+        'incidencias_trafico'
+    ]
+    
+    for carpeta in carpetas_necesarias:
+        os.makedirs(carpeta, exist_ok=True)
+        print(f"📁 Carpeta creada/verificada: {carpeta}")
+    
+    rutas_cargadas = cargar_rutas_disponibles()
+    
+    try:
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        tablas = cursor.fetchall()
+        print(f"✅ Base de datos: {len(tablas)} tablas verificadas")
+    except Exception as e:
+        print(f"❌ Error en base de datos: {e}")
+    
+    print(f"🎯 Sistema listo. Rutas disponibles: {rutas_cargadas}")
+    return True
+
+def set_webhook():
+    """Configurar webhook en Railway con manejo robusto de errores"""
+    try:
+        max_intentos = 3
+        for intento in range(max_intentos):
+            try:
+                railway_url = os.environ.get('RAILWAY_STATIC_URL', 
+                                           f"https://{os.environ.get('RAILWAY_SERVICE_NAME', 'monitoring-routes-pjcdmx')}.up.railway.app")
+                webhook_url = f"{railway_url}/webhook"
+                
+                print(f"🔄 Configurando webhook (intento {intento + 1}): {webhook_url}")
+                
+                bot.remove_webhook()
+                time.sleep(2)
+                
+                resultado = bot.set_webhook(url=webhook_url)
+                
+                if resultado:
+                    print(f"✅ Webhook configurado: {webhook_url}")
+                    
+                    time.sleep(1)
+                    info = bot.get_webhook_info()
+                    print(f"📊 Info webhook: {info.url} - Pendientes: {info.pending_update_count}")
+                    
+                    return True
+                else:
+                    print(f"❌ Intento {intento + 1} falló")
+                    
+            except Exception as e:
+                print(f"❌ Error en intento {intento + 1}: {e}")
+                if intento < max_intentos - 1:
+                    time.sleep(5)
+        
+        print("❌ Todos los intentos de configurar webhook fallaron")
+        return False
+        
+    except Exception as e:
+        print(f"❌ Error crítico configurando webhook: {e}")
+        return False
+
 # =============================================================================
-# COMANDOS PRINCIPALES - ASIGNACIÓN AUTOMÁTICA
+# HANDLERS DE TELEGRAM CON MANEJO DE ERRORES
 # =============================================================================
 
+@manejar_errores_telegram
 @bot.message_handler(commands=['start', 'hola'])
 def enviar_bienvenida(message):
     print(f"🎯 COMANDO /start RECIBIDO de: {message.from_user.first_name}")
@@ -351,6 +425,7 @@ def enviar_bienvenida(message):
     except Exception as e:
         print(f"❌ ERROR enviando mensaje: {e}")
 
+@manejar_errores_telegram
 @bot.message_handler(commands=['solicitar_ruta'])
 def solicitar_ruta_automatica(message):
     """Asignar ruta automáticamente al repartidor"""
@@ -360,7 +435,6 @@ def solicitar_ruta_automatica(message):
         
         print(f"🔄 Solicitud de ruta de {user_name} (ID: {user_id})")
         
-        # Verificar si ya tiene ruta asignada
         if user_id in RUTAS_ASIGNADAS:
             bot.reply_to(message, 
                         "📭 *Ya tienes una ruta asignada.*\n\n"
@@ -369,7 +443,6 @@ def solicitar_ruta_automatica(message):
                         parse_mode='Markdown')
             return
         
-        # Recargar rutas disponibles
         rutas_disponibles = cargar_rutas_disponibles()
         
         if rutas_disponibles == 0:
@@ -380,28 +453,21 @@ def solicitar_ruta_automatica(message):
                         parse_mode='Markdown')
             return
         
-        # Asignar la primera ruta disponible
         ruta_asignada = RUTAS_DISPONIBLES.pop(0)
         ruta_id = ruta_asignada['ruta_id']
         zona = ruta_asignada['zona']
         
-        # Actualizar la ruta en archivo
         archivo_ruta = f"rutas_telegram/Ruta_{ruta_id}_{zona}.json"
         ruta_asignada['repartidor_asignado'] = f"user_{user_id}"
         ruta_asignada['estado'] = 'asignada'
         ruta_asignada['timestamp_asignacion'] = datetime.now().isoformat()
         
-        # Guardar cambios
         with open(archivo_ruta, 'w', encoding='utf-8') as f:
             json.dump(ruta_asignada, f, indent=2, ensure_ascii=False)
         
-        # Registrar asignación en memoria
         RUTAS_ASIGNADAS[user_id] = ruta_id
-        
-        # Enviar ruta al repartidor
         mensaje = formatear_ruta_para_repartidor(ruta_asignada)
         
-        # Botón para Google Maps
         markup = types.InlineKeyboardMarkup()
         btn_maps = types.InlineKeyboardButton("🗺️ Abrir en Google Maps", url=ruta_asignada['google_maps_url'])
         markup.add(btn_maps)
@@ -417,6 +483,7 @@ def solicitar_ruta_automatica(message):
                     "Por favor, intenta nuevamente o contacta a soporte.",
                     parse_mode='Markdown')
 
+@manejar_errores_telegram
 @bot.message_handler(commands=['miruta'])
 def ver_mi_ruta(message):
     """Ver la ruta asignada actual"""
@@ -432,7 +499,6 @@ def ver_mi_ruta(message):
     
     ruta_id = RUTAS_ASIGNADAS[user_id]
     
-    # Buscar la ruta en archivos
     for archivo in os.listdir('rutas_telegram'):
         if f"Ruta_{ruta_id}_" in archivo:
             try:
@@ -455,10 +521,7 @@ def ver_mi_ruta(message):
                 "Por favor, usa /solicitar_ruta para obtener una nueva ruta.",
                 parse_mode='Markdown')
 
-# =============================================================================
-# COMANDOS DE ADMINISTRADOR
-# =============================================================================
-
+@manejar_errores_telegram
 @bot.message_handler(commands=['estado_rutas'])
 def estado_rutas(message):
     """Ver estado de todas las rutas (solo admin)"""
@@ -473,7 +536,6 @@ def estado_rutas(message):
     rutas_asignadas = 0
     rutas_completadas = 0
     
-    # Contar rutas por estado
     if os.path.exists('rutas_telegram'):
         for archivo in os.listdir('rutas_telegram'):
             if archivo.endswith('.json'):
@@ -505,6 +567,7 @@ def estado_rutas(message):
     
     bot.reply_to(message, mensaje, parse_mode='Markdown')
 
+@manejar_errores_telegram
 @bot.message_handler(commands=['generar_rutas_ejemplo'])
 def generar_rutas_ejemplo(message):
     """Generar rutas de ejemplo para pruebas (solo admin)"""
@@ -514,7 +577,6 @@ def generar_rutas_ejemplo(message):
     try:
         bot.reply_to(message, "🔄 Generando rutas de ejemplo...")
         
-        # Datos de ejemplo del Tribunal
         rutas_ejemplo = [
             {
                 'ruta_id': 1,
@@ -547,48 +609,14 @@ def generar_rutas_ejemplo(message):
                 },
                 'estado': 'pendiente',
                 'timestamp_creacion': datetime.now().isoformat()
-            },
-            {
-                'ruta_id': 2,
-                'zona': 'SUR',
-                'repartidor_asignado': None,
-                'google_maps_url': 'https://maps.google.com/maps/dir/19.4283717,-99.1430307/19.3556000,-99.1623000/19.3600000,-99.1650000',
-                'paradas': [
-                    {
-                        'orden': 1,
-                        'nombre': 'MTRO. JAVIER DÍAZ MORALES',
-                        'direccion': 'Calzada de Tlalpan 789, Torre Judicial, Coyoacán, CDMX',
-                        'dependencia': 'UNIDAD DE NOTIFICACIONES',
-                        'coords': '19.3556000,-99.1623000',
-                        'estado': 'pendiente'
-                    },
-                    {
-                        'orden': 2,
-                        'nombre': 'LIC. ANA Martínez Sánchez',
-                        'direccion': 'Miguel Ángel de Quevedo 321, Local 2, Coyoacán, CDMX',
-                        'dependencia': 'ARCHIVO JUDICIAL',
-                        'coords': '19.3600000,-99.1650000',
-                        'estado': 'pendiente'
-                    }
-                ],
-                'estadisticas': {
-                    'total_paradas': 2,
-                    'distancia_km': 8.7,
-                    'tiempo_min': 25,
-                    'origen': 'TSJCDMX - Niños Héroes 150'
-                },
-                'estado': 'pendiente',
-                'timestamp_creacion': datetime.now().isoformat()
             }
         ]
         
-        # Guardar rutas de ejemplo
         for ruta in rutas_ejemplo:
             archivo = f"rutas_telegram/Ruta_{ruta['ruta_id']}_{ruta['zona']}.json"
             with open(archivo, 'w', encoding='utf-8') as f:
                 json.dump(ruta, f, indent=2, ensure_ascii=False)
         
-        # Recargar disponibles
         cargar_rutas_disponibles()
         
         bot.reply_to(message, 
@@ -601,10 +629,7 @@ def generar_rutas_ejemplo(message):
     except Exception as e:
         bot.reply_to(message, f"❌ Error generando rutas: {str(e)}")
 
-# =============================================================================
-# COMANDOS ORIGINALES (MANTENIDOS)
-# =============================================================================
-
+@manejar_errores_telegram
 @bot.message_handler(commands=['incidente'])
 def reportar_incidente(message):
     texto = """
@@ -625,6 +650,7 @@ Escribe tu reporte:
     bot.reply_to(message, texto, parse_mode='Markdown')
     print(f"🚨 Incidente: {message.from_user.first_name}")
 
+@manejar_errores_telegram
 @bot.message_handler(commands=['ubicacion'])
 def solicitar_ubicacion(message):
     texto = """
@@ -643,6 +669,7 @@ Envía tu ubicación actual:
     bot.reply_to(message, texto, parse_mode='Markdown')
     print(f"📍 Ubicación: {message.from_user.first_name}")
 
+@manejar_errores_telegram
 @bot.message_handler(content_types=['location'])
 def manejar_ubicacion(message):
     user = message.from_user.first_name
@@ -650,7 +677,6 @@ def manejar_ubicacion(message):
     lat = message.location.latitude
     lon = message.location.longitude
     
-    # Guardar en base de datos
     cursor.execute('INSERT INTO incidentes (user_id, user_name, tipo, ubicacion) VALUES (?, ?, ?, ?)',
                   (user_id, user, 'ubicacion', f"{lat},{lon}"))
     conn.commit()
@@ -661,17 +687,17 @@ def manejar_ubicacion(message):
     
     bot.reply_to(message, respuesta, parse_mode='Markdown')
     print(f"📍 Ubicación recibida: {user} - {lat},{lon}")
-    
+
+@manejar_errores_telegram  
 @bot.message_handler(content_types=['photo'])
 def manejar_foto(message):
     user = message.from_user.first_name
     user_id = message.from_user.id
-    file_id = message.photo[-1].file_id  # La foto de mayor calidad
+    file_id = message.photo[-1].file_id
     caption = message.caption if message.caption else "Sin descripción"
     
     print(f"📸 Foto recibida de {user}: {caption}")
     
-    # 🆕 DETERMINAR TIPO Y CARPETA (SOLO UNA VEZ)
     if any(word in caption.lower() for word in ['entregado', 'entregada', '✅', 'recibido']):
         tipo = 'foto_acuse'
         carpeta = 'entregas'
@@ -687,16 +713,12 @@ def manejar_foto(message):
 
     print(f"🎯 CLASIFICACIÓN: '{caption}' → Carpeta: {carpeta}, Tipo: {tipo}")
     
-    # 🆕 DESCARGAR EN CARPETA CORRECTA
     ruta_foto_local = descargar_foto_telegram(file_id, tipo_foto=carpeta)
     
-    # 🆕 GUARDAR EN BASE DE DATOS CON LA NUEVA FUNCIÓN
     if ruta_foto_local:
-        # Leer los datos de la imagen para guardar en BD
         with open(ruta_foto_local, 'rb') as f:
             datos_imagen = f.read()
         
-        # Guardar en base de datos
         guardar_foto_en_bd(
             file_id=file_id,
             user_id=user_id,
@@ -719,14 +741,11 @@ def manejar_foto(message):
             ruta_local=None
         )
 
-    # 🆕 VARIABLE PARA PERSONA ENTREGADA
     persona_entregada = "Por determinar"
     
-    # El resto de tu lógica original para procesar entregas...
     if any(word in caption.lower() for word in ['entregado', 'entregada', '✅', 'recibido']):
         tipo = 'foto_acuse'
         
-        # Intentar extraer nombre de persona automáticamente
         palabras = caption.split()
         for i, palabra in enumerate(palabras):
             if palabra.lower() in ['a', 'para', 'entregado', 'entregada'] and i + 1 < len(palabras):
@@ -735,7 +754,6 @@ def manejar_foto(message):
         
         print(f"🎯 Detectada entrega a: {persona_entregada}")
         
-        # Registrar en sistema automáticamente CON FOTO REAL
         if user_id in RUTAS_ASIGNADAS:
             if registrar_entrega_sistema(user_id, user, persona_entregada, ruta_foto_local, caption):
                 respuesta = f"📦 *ACUSE CON FOTO REGISTRADO* ¡Gracias {user}!\n\n✅ Entrega a *{persona_entregada}* registrada automáticamente.\n📸 Foto guardada en el sistema."
@@ -751,14 +769,11 @@ def manejar_foto(message):
         tipo = 'foto_incidente'
         respuesta = f"📸 *FOTO RECIBIDA* ¡Gracias {user}!\n\n📝 Descripción: {caption}\n📸 Foto guardada en el sistema."
     
-    # Guardar en tabla incidentes también (mantener compatibilidad)
     cursor.execute('INSERT INTO incidentes (user_id, user_name, tipo, descripcion, foto_id) VALUES (?, ?, ?, ?, ?)',
                   (user_id, user, tipo, caption, ruta_foto_local))
     conn.commit()
     
-    # 🆕 🎯 ACTUALIZACIÓN AUTOMÁTICA DEL EXCEL - AGREGAR ESTO
     if any(word in caption.lower() for word in ['entregado', 'entregada', '✅', 'recibido']):
-        # Crear datos para actualizar Excel
         datos_entrega_excel = {
             'ruta_id': RUTAS_ASIGNADAS.get(user_id) if user_id in RUTAS_ASIGNADAS else 'desconocido',
             'repartidor': user,
@@ -769,14 +784,13 @@ def manejar_foto(message):
             'user_id': user_id
         }
         
-        # 🎯 LLAMAR A LA ACTUALIZACIÓN AUTOMÁTICA DEL EXCEL
         threading.Thread(target=actualizar_excel_desde_bot, args=(datos_entrega_excel,)).start()
         print(f"🚀 Iniciando actualización automática de Excel para: {persona_entregada}")
     
-    # Respuesta al usuario (esto ya existe) - SOLO UN bot.reply_to
     bot.reply_to(message, respuesta, parse_mode='Markdown')
     print(f"📸 Procesamiento completado: {user} - Tipo: {tipo}")
-    
+
+@manejar_errores_telegram
 @bot.message_handler(commands=['atencionH', 'humano', 'soporte'])
 def solicitar_atencion_humana(message):
     user = message.from_user.first_name
@@ -798,6 +812,7 @@ _Proporciona este ID al contactar_
     bot.reply_to(message, texto, parse_mode='Markdown')
     print(f"🚨 AtenciónH: {user} (ID: {user_id})")
 
+@manejar_errores_telegram
 @bot.message_handler(commands=['estatus'])
 def actualizar_estatus(message):
     texto = """
@@ -818,6 +833,7 @@ Opciones disponibles:
     bot.reply_to(message, texto, parse_mode='Markdown')
     print(f"📊 Estatus: {message.from_user.first_name}")
 
+@manejar_errores_telegram
 @bot.message_handler(commands=['entregar'])
 def iniciar_entrega(message):
     texto = """
@@ -839,6 +855,7 @@ Para registrar una entrega:
     bot.reply_to(message, texto, parse_mode='Markdown')
     print(f"📦 Entregar: {message.from_user.first_name}")
 
+@manejar_errores_telegram
 @bot.message_handler(func=lambda message: True, content_types=['text'])
 def manejar_texto_general(message):
     if message.text.startswith('/'):
@@ -848,19 +865,15 @@ def manejar_texto_general(message):
     user_id = message.from_user.id
     texto = message.text
     
-    # Detectar si es registro de entrega
     if any(word in texto.lower() for word in ['entregado', 'entregada', 'recibido']) and len(texto.split()) > 2:
-        # Probablemente es "Entregado a [Nombre]"
         partes = texto.split()
         persona_entregada = texto
         
-        # Intentar extraer nombre después de "a" o "para"
         for i, palabra in enumerate(partes):
             if palabra.lower() in ['a', 'para', 'entregado', 'entregada'] and i + 1 < len(partes):
                 persona_entregada = " ".join(partes[i+1:])
                 break
         
-        # Registrar en sistema si tiene ruta asignada
         if user_id in RUTAS_ASIGNADAS:
             if registrar_entrega_sistema(user_id, user, persona_entregada, None, texto):
                 respuesta = f"📦 *ENTREGA REGISTRADA* ¡Gracias {user}!\nEntrega a *{persona_entregada}* registrada en el sistema."
@@ -873,7 +886,6 @@ def manejar_texto_general(message):
         print(f"📦 Entrega registrada: {user} - {persona_entregada}")
         return
     
-    # Detectar estatus automáticamente (lógica original)
     estatus_keywords = {
         '✅': 'ENTREGADO', 'entregado': 'ENTREGADO',
         '⏳': 'RETRASADO', 'retrasado': 'RETRASADO', 
@@ -888,64 +900,24 @@ def manejar_texto_general(message):
             print(f"📊 Estatus actualizado: {user} - {estatus}")
             return
     
-    # Si no es estatus ni entrega, es reporte normal
     respuesta = f"✅ *REPORTE RECIBIDO* ¡Gracias {user}! Registrado: \"{texto}\""
     bot.reply_to(message, respuesta, parse_mode='Markdown')
     print(f"📝 Reporte: {user} - {texto}")
 
 # =============================================================================
-# INICIALIZACIÓN Y EJECUCIÓN
-# =============================================================================
-
-def inicializar_sistema_completo():
-    """Inicialización completa del sistema"""
-    print("🔄 Inicializando sistema completo PJCDMX...")
-    
-    # Crear todas las carpetas necesarias
-    carpetas_necesarias = [
-        'carpeta_fotos_central/entregas',
-        'carpeta_fotos_central/incidentes', 
-        'carpeta_fotos_central/estatus',
-        'carpeta_fotos_central/general',
-        'rutas_telegram', 
-        'avances_ruta', 
-        'incidencias_trafico'
-    ]
-    
-    for carpeta in carpetas_necesarias:
-        os.makedirs(carpeta, exist_ok=True)
-        print(f"📁 Carpeta creada/verificada: {carpeta}")
-    
-    # Cargar rutas disponibles
-    rutas_cargadas = cargar_rutas_disponibles()
-    
-    # Verificar conexión a base de datos
-    try:
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
-        tablas = cursor.fetchall()
-        print(f"✅ Base de datos: {len(tablas)} tablas verificadas")
-    except Exception as e:
-        print(f"❌ Error en base de datos: {e}")
-    
-    print(f"🎯 Sistema listo. Rutas disponibles: {rutas_cargadas}")
-    return True
-
-# =============================================================================
-# API PARA RECIBIR RUTAS DEL PROGRAMA GENERADOR
+# ENDPOINTS FLASK MEJORADOS
 # =============================================================================
 
 @app.route('/api/health', methods=['GET'])
 def health_check_detallado():
     """Endpoint de salud completo"""
     try:
-        # Verificar base de datos
         cursor.execute("SELECT COUNT(*) FROM incidentes")
         total_incidentes = cursor.fetchone()[0]
         
         cursor.execute("SELECT COUNT(*) FROM fotos") 
         total_fotos = cursor.fetchone()[0]
         
-        # Verificar archivos de rutas
         total_rutas_archivo = len([f for f in os.listdir('rutas_telegram') if f.endswith('.json')]) if os.path.exists('rutas_telegram') else 0
         
         return jsonify({
@@ -968,6 +940,89 @@ def health_check_detallado():
     except Exception as e:
         return jsonify({"status": "error", "error": str(e)}), 500
 
+@app.route('/api/status')
+def status_detallado():
+    """Endpoint de estado detallado para monitoreo"""
+    try:
+        import psutil
+        import os
+        
+        process = psutil.Process(os.getpid())
+        
+        status_info = {
+            "status": "healthy",
+            "service": "bot_rutas_pjcdmx",
+            "timestamp": datetime.now().isoformat(),
+            "system": {
+                "memory_mb": round(process.memory_info().rss / 1024 / 1024, 2),
+                "cpu_percent": round(process.cpu_percent(), 2),
+                "uptime_seconds": round(time.time() - process.create_time(), 2)
+            },
+            "bot": {
+                "rutas_disponibles": len(RUTAS_DISPONIBLES),
+                "repartidores_activos": len(RUTAS_ASIGNADAS),
+                "webhook_configured": True
+            },
+            "database": {
+                "incidentes": cursor.execute("SELECT COUNT(*) FROM incidentes").fetchone()[0],
+                "fotos": cursor.execute("SELECT COUNT(*) FROM fotos").fetchone()[0]
+            }
+        }
+        
+        return jsonify(status_info)
+        
+    except Exception as e:
+        return jsonify({"status": "error", "error": str(e)}), 500
+
+@app.route('/api/debug')
+def debug_info():
+    """Información de debug para troubleshooting"""
+    import os
+    return jsonify({
+        'environment': dict(os.environ),
+        'current_directory': os.getcwd(),
+        'files': os.listdir('.'),
+        'python_version': os.sys.version,
+        'bot_token_set': bool(os.environ.get('BOT_TOKEN'))
+    })
+
+@app.route('/api/metrics')
+def metrics_prometheus():
+    """Endpoint de métricas compatible con Prometheus"""
+    try:
+        import psutil
+        import os
+        
+        process = psutil.Process(os.getpid())
+        memory_mb = process.memory_info().rss / 1024 / 1024
+        
+        metrics = [
+            f"# HELP bot_memory_usage Memory usage in MB",
+            f"# TYPE bot_memory_usage gauge",
+            f"bot_memory_usage {memory_mb}",
+            f"",
+            f"# HELP bot_rutas_disponibles Number of available routes", 
+            f"# TYPE bot_rutas_disponibles gauge",
+            f"bot_rutas_disponibles {len(RUTAS_DISPONIBLES)}",
+            f"",
+            f"# HELP bot_repartidores_activos Number of active delivery people",
+            f"# TYPE bot_repartidores_activos gauge", 
+            f"bot_repartidores_activos {len(RUTAS_ASIGNADAS)}",
+            f"",
+            f"# HELP bot_incidentes_total Total number of incidents",
+            f"# TYPE bot_incidentes_total counter",
+            f"bot_incidentes_total {cursor.execute('SELECT COUNT(*) FROM incidentes').fetchone()[0]}",
+            f"",
+            f"# HELP bot_fotos_total Total number of photos stored",
+            f"# TYPE bot_fotos_total counter",
+            f"bot_fotos_total {cursor.execute('SELECT COUNT(*) FROM fotos').fetchone()[0]}"
+        ]
+        
+        return Response('\n'.join(metrics), mimetype='text/plain')
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 @app.route('/api/rutas', methods=['POST'])
 def recibir_rutas_desde_programa():
     """Endpoint para que el programa generador envíe rutas reales"""
@@ -980,13 +1035,11 @@ def recibir_rutas_desde_programa():
         ruta_id = datos_ruta.get('ruta_id', 1)
         zona = datos_ruta.get('zona', 'GENERAL')
         
-        # Guardar la ruta en el sistema
         archivo_ruta = f"rutas_telegram/Ruta_{ruta_id}_{zona}.json"
         
         with open(archivo_ruta, 'w', encoding='utf-8') as f:
             json.dump(datos_ruta, f, indent=2, ensure_ascii=False)
         
-        # Recargar rutas disponibles
         cargar_rutas_disponibles()
         
         print(f"✅ Ruta {ruta_id} recibida via API y guardada")
@@ -1001,10 +1054,6 @@ def recibir_rutas_desde_programa():
     except Exception as e:
         print(f"❌ Error en API /api/rutas: {e}")
         return jsonify({"error": str(e)}), 500
-        
-# =============================================================================
-# CONFIGURACIÓN WEBHOOK PARA RAILWAY
-# =============================================================================
 
 @app.route('/webhook', methods=['POST', 'GET'])
 def webhook():
@@ -1014,19 +1063,19 @@ def webhook():
             json_string = request.get_data().decode('utf-8')
             update = telebot.types.Update.de_json(json_string)
             
-            # 🆕 DEBUG: Ver qué está recibiendo
-            print(f"📝 Update recibido: {json_string[:200]}...")  # Primeros 200 chars
+            print(f"📝 Update recibido: {json_string[:200]}...")
             
             bot.process_new_updates([update])
             print("✅ Update procesado")
             return 'OK', 200
     return 'Hello! Bot is running!', 200
+
 @app.route('/')
 def index():
     return "🤖 Bot PJCDMX - Sistema de Rutas Automáticas 🚚"
 
 # =============================================================================
-# ENDPOINT TEMPORAL PARA VERIFICAR FOTOS
+# ENDPOINTS ADICIONALES EXISTENTES (MANTENIDOS)
 # =============================================================================
 
 @app.route('/api/verificar_fotos')
@@ -1045,12 +1094,10 @@ def verificar_fotos():
             'timestamp': datetime.now().isoformat()
         }
         
-        # Verificar si existe la carpeta
         if os.path.exists('fotos_acuses'):
             archivos = os.listdir('fotos_acuses')
             resultado['archivos_en_fotos_acuses'] = archivos
             
-            # Ver detalles de cada archivo
             for archivo in archivos:
                 ruta = f"fotos_acuses/{archivo}"
                 if os.path.exists(ruta):
@@ -1075,28 +1122,6 @@ def verificar_fotos():
     except Exception as e:
         return jsonify({'status': 'error', 'error': str(e)}), 500
 
-def set_webhook():
-    """Configurar webhook en Railway"""
-    try:
-        # Obtener la URL de Railway automáticamente
-        railway_url = os.environ.get('RAILWAY_STATIC_URL', f"https://{os.environ.get('RAILWAY_SERVICE_NAME', 'monitoring-routes-pjcdmx')}.up.railway.app")
-        webhook_url = f"{railway_url}/webhook"
-        
-        # Remover webhook anterior y configurar nuevo
-        bot.remove_webhook()
-        time.sleep(1)
-        bot.set_webhook(url=webhook_url)
-        
-        print(f"✅ Webhook configurado: {webhook_url}")
-        return True
-    except Exception as e:
-        print(f"❌ Error configurando webhook: {e}")
-        return False
-
-# =============================================================================
-# ENDPOINTS PARA BASE DE DATOS - AGREGAR ESTO
-# =============================================================================
-
 @app.route('/api/verificar_bd')
 def verificar_bd():
     """Verificar que las tablas existen en la base de datos"""
@@ -1104,7 +1129,6 @@ def verificar_bd():
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
         tablas = cursor.fetchall()
         
-        # Contar registros en cada tabla
         conteos = {}
         for tabla in [t[0] for t in tablas]:
             cursor.execute(f"SELECT COUNT(*) FROM {tabla}")
@@ -1167,83 +1191,12 @@ def servir_foto_desde_bd(file_id):
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-@app.route('/galeria_carpetas')
-def galeria_carpetas():
-    """Página para navegar por las carpetas de fotos"""
-    html = """
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>📸 Galería Organizada - PJCDMX</title>
-        <style>
-            body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }
-            .carpeta { background: white; padding: 20px; margin: 15px 0; border-radius: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
-            .carpeta h2 { margin-top: 0; color: #333; }
-            .entregas { border-left: 5px solid #28a745; }
-            .incidentes { border-left: 5px solid #dc3545; }
-            .estatus { border-left: 5px solid #ffc107; }
-            .general { border-left: 5px solid #17a2b8; }
-            .fotos { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; }
-            .fotos img { max-width: 200px; border-radius: 5px; border: 1px solid #ddd; }
-            .vacío { color: #666; font-style: italic; }
-        </style>
-    </head>
-    <body>
-        <h1>📸 Galería Organizada de Fotos</h1>
-        <p>Sistema de Rutas PJCDMX - Fotos clasificadas automáticamente</p>
-    """
-    
-    carpetas = {
-        'entregas': '📦 Entregas y Acuses',
-        'incidentes': '🚨 Incidentes y Problemas', 
-        'estatus': '📊 Estatus y Actualizaciones',
-        'general': '📸 Fotos Generales'
-    }
-    
-    for carpeta, nombre in carpetas.items():
-        ruta_carpeta = f'carpeta_fotos_central/{carpeta}'
-        html += f'<div class="carpeta {carpeta}">'
-        html += f'<h2>{nombre}</h2>'
-        
-        if os.path.exists(ruta_carpeta):
-            fotos = os.listdir(ruta_carpeta)
-            if fotos:
-                html += f'<p><strong>{len(fotos)} fotos</strong></p>'
-                html += '<div class="fotos">'
-                for foto in fotos[:6]:  # Mostrar máximo 6
-                    html += f'<img src="/carpeta_fotos_central/{carpeta}/{foto}" alt="{foto}">'
-                if len(fotos) > 6:
-                    html += f'<p>... y {len(fotos) - 6} fotos más</p>'
-                html += '</div>'
-            else:
-                html += '<p class="vacío">No hay fotos en esta categoría</p>'
-        else:
-            html += '<p class="vacío">Carpeta no existe</p>'
-        
-        html += '</div>'
-    
-    html += "</body></html>"
-    return html
-
-@app.route('/carpeta_fotos_central/<path:filename>')
-def servir_foto_carpeta(filename):
-    """Servir fotos desde la carpeta central"""
-    try:
-        return send_file(f'carpeta_fotos_central/{filename}')
-    except Exception as e:
-        return f"Error cargando foto: {str(e)}", 404
-
-# 🆕 🎯 =============================================================================
-# ENDPOINT PARA SINCRONIZACIÓN AUTOMÁTICA DE EXCEL
-# =============================================================================
-
 @app.route('/api/forzar_actualizacion_excel', methods=['POST'])
 def forzar_actualizacion_excel():
     """Endpoint para forzar la actualización de todos los Excel con las fotos"""
     try:
         actualizaciones = 0
         
-        # Buscar todas las entregas en avances_ruta
         for archivo in os.listdir('avances_ruta'):
             if archivo.endswith('.json'):
                 with open(f'avances_ruta/{archivo}', 'r') as f:
@@ -1261,7 +1214,8 @@ def forzar_actualizacion_excel():
     except Exception as e:
         return jsonify({"status": "error", "error": str(e)}), 500
 
-# CONFIGURACIÓN DE EJECUCIÓN MEJORADA - TODO INTEGRADO
+# =============================================================================
+# INICIALIZACIÓN Y EJECUCIÓN
 # =============================================================================
 
 print("\n🎯 SISTEMA AUTOMÁTICO DE RUTAS PJCDMX - 100% OPERATIVO")
@@ -1269,24 +1223,14 @@ print("📱 Comandos: /solicitar_ruta, /miruta, /entregar, /estado_rutas")
 
 inicializar_sistema_completo()
 
-# =============================================================================
-# EJECUCIÓN PRINCIPAL DEL SISTEMA
-# =============================================================================
-
 if __name__ == "__main__":
-    # Inicialización completa
-    if inicializar_sistema_completo():
-        print("🤖 BOT PJCDMX INICIADO CORRECTAMENTE")
-        
-        # Configurar webhook para producción
-        if os.environ.get('RAILWAY_ENVIRONMENT'):
-            set_webhook()
-        
-        # Iniciar servidor
+    print("🤖 BOT PJCDMX INICIADO CORRECTAMENTE")
+    
+    if os.environ.get('RAILWAY_ENVIRONMENT'):
+        set_webhook()
+    
+    if not os.environ.get('RAILWAY_ENVIRONMENT'):
         port = int(os.environ.get('PORT', 8080))
         app.run(host='0.0.0.0', port=port, debug=False)
     else:
-        print("❌ ERROR: No se pudo inicializar el sistema")
-
-# Railway usará Gunicorn via Procfile, no ejecutamos app.run() aquí
-
+        print("✅ Sistema listo para producción en Railway")
