@@ -1233,14 +1233,6 @@ def servir_foto_carpeta(filename):
     except Exception as e:
         return f"Error cargando foto: {str(e)}", 404
 
-@app.route('/carpeta_fotos_central/<path:filename>')
-def servir_foto_carpeta(filename):
-    """Servir fotos desde la carpeta central"""
-    try:
-        return send_file(f'carpeta_fotos_central/{filename}')
-    except Exception as e:
-        return f"Error cargando foto: {str(e)}", 404
-
 # 🆕 🎯 =============================================================================
 # ENDPOINT PARA SINCRONIZACIÓN AUTOMÁTICA DE EXCEL
 # =============================================================================
