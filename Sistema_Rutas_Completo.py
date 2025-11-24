@@ -19,7 +19,7 @@ from PIL import Image, ImageTk
 import io
 
 # =============================================================================
-# CLASE CONEXIÓN CON BOT RAILWAY - MEJORADA
+# CLASE CONEXIÓN CON BOT RAILWAY - MEJORADA (COMPLETA)
 # =============================================================================
 class ConexionBotRailway:
     def __init__(self, url_base):
@@ -71,375 +71,249 @@ class ConexionBotRailway:
             print(f"❌ Error descargando foto: {e}")
             return False
 
+    # 🆕 AGREGAR ESTOS MÉTODOS FALTANTES:
+    def obtener_avances_pendientes(self):
+        """Obtiene avances pendientes de sincronización del bot"""
+        try:
+            url = f"{self.url_base}/api/avances_pendientes"
+            response = requests.get(url, timeout=self.timeout)
+            
+            if response.status_code == 200:
+                datos = response.json()
+                return datos.get('avances', [])
+            else:
+                print(f"❌ Error obteniendo avances: {response.status_code}")
+                return []
+                
+        except Exception as e:
+            print(f"❌ Error obteniendo avances: {str(e)}")
+            return []
+    
+    def marcar_avance_procesado(self, avance_id):
+        """Marca un avance como procesado en el bot"""
+        try:
+            url = f"{self.url_base}/api/avances/{avance_id}/procesado"
+            response = requests.post(url, timeout=10)
+            return response.status_code == 200
+        except Exception as e:
+            print(f"❌ Error marcando avance como procesado: {str(e)}")
+            return False
+
 # =============================================================================
-# CLASE GESTOR TELEGRAM - COMPLETAMENTE MEJORADA
+# CLASE GESTOR TELEGRAM (GestorTelegram) - ACTUALIZADA
 # =============================================================================
 class GestorTelegram:
-    def __init__(self, gui_principal):
-        self.gui = gui_principal
-        self.carpetas = ['rutas_telegram', 'avances_ruta', 'incidencias_trafico', 'fotos_acuses', 'fotos_entregas', 'fotos_reportes']
-        self._inicializar_carpetas()
+    def __init__(self, gui):
+        self.gui = gui
+        self.railway_url = "https://monitoring-routes-pjcdmx-production.up.railway.app"
+        self.conexion = ConexionBotRailway(self.railway_url)
         
-    def _inicializar_carpetas(self):
-        for carpeta in self.carpetas:
-            os.makedirs(carpeta, exist_ok=True)
-    
-    def asignar_ruta_repartidor(self, archivo_ruta, repartidor):
-        """Asigna una ruta específica a un repartidor"""
+    def obtener_rutas_pendientes(self):
+        """Obtiene lista de rutas pendientes de asignación"""
         try:
-            with open(f"rutas_telegram/{archivo_ruta}", 'r', encoding='utf-8') as f:
+            rutas = []
+            if os.path.exists("rutas_telegram"):
+                for archivo in os.listdir("rutas_telegram"):
+                    if archivo.endswith('.json'):
+                        with open(f"rutas_telegram/{archivo}", 'r', encoding='utf-8') as f:
+                            ruta_data = json.load(f)
+                            
+                        if ruta_data.get('estado') == 'pendiente':
+                            # Calcular progreso
+                            paradas = ruta_data.get('paradas', [])
+                            entregadas = sum(1 for p in paradas if p.get('estado') == 'entregado')
+                            
+                            rutas.append({
+                                'ruta_id': ruta_data.get('ruta_id'),
+                                'zona': ruta_data.get('zona'),
+                                'archivo': archivo,
+                                'progreso': f"{entregadas}/{len(paradas)}"
+                            })
+            
+            return rutas
+            
+        except Exception as e:
+            self.gui.log(f"❌ Error obteniendo rutas pendientes: {str(e)}")
+            return []
+
+    def asignar_ruta_repartidor(self, archivo_ruta, repartidor):
+        """Asigna una ruta a un repartidor específico"""
+        try:
+            ruta_path = f"rutas_telegram/{archivo_ruta}"
+            
+            with open(ruta_path, 'r', encoding='utf-8') as f:
                 ruta_data = json.load(f)
             
-            # Actualizar con info del repartidor
-            ruta_data['repartidor_asignado'] = repartidor
             ruta_data['estado'] = 'asignada'
-            ruta_data['timestamp_asignacion'] = datetime.now().isoformat()
+            ruta_data['repartidor_asignado'] = repartidor
+            ruta_data['fecha_asignacion'] = datetime.now().isoformat()
             
-            # Guardar archivo actualizado
-            with open(f"rutas_telegram/{archivo_ruta}", 'w', encoding='utf-8') as f:
+            with open(ruta_path, 'w', encoding='utf-8') as f:
                 json.dump(ruta_data, f, indent=2, ensure_ascii=False)
             
-            self.gui.log(f"✅ Ruta {archivo_ruta} asignada a {repartidor}")
+            self.gui.log(f"✅ Ruta {ruta_data['ruta_id']} asignada a {repartidor}")
             return True
             
         except Exception as e:
             self.gui.log(f"❌ Error asignando ruta: {str(e)}")
             return False
-    
-    def procesar_entrega_repartidor(self, datos_entrega):
-        """Procesa una entrega reportada por el bot CON FOTOS MEJORADO"""
-        try:
-            # 1. GUARDAR AVANCE
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            archivo_avance = f"avances_ruta/entrega_{timestamp}.json"
-            
-            # 🆕 MEJORA: Procesar foto antes de guardar
-            datos_entrega = self._procesar_foto_entrega(datos_entrega)
-            
-            with open(archivo_avance, 'w', encoding='utf-8') as f:
-                json.dump(datos_entrega, f, indent=2, ensure_ascii=False)
-            
-            # 2. ACTUALIZAR EXCEL ORIGINAL CON FOTOS
-            self._actualizar_excel_entrega(datos_entrega)
-            
-            # 3. ACTUALIZAR ESTADO DE RUTA
-            self._actualizar_estado_ruta(datos_entrega)
-            
-            self.gui.log(f"📦 Entrega procesada: {datos_entrega.get('persona_entregada', 'N/A')}")
-            if datos_entrega.get('foto_local'):
-                self.gui.log(f"📸 Foto guardada: {datos_entrega.get('foto_local')}")
-            
-            return True
-            
-        except Exception as e:
-            self.gui.log(f"❌ Error procesando entrega: {str(e)}")
-            return False
 
-    def _procesar_foto_entrega(self, datos_entrega):
-        """Procesa y descarga la foto de entrega si viene de Telegram"""
-        try:
-            foto_url = datos_entrega.get('foto_acuse', '')
-            
-            if foto_url and foto_url.startswith('http'):
-                # Generar nombre único para la foto
-                ruta_id = datos_entrega.get('ruta_id', 'unknown')
-                persona = datos_entrega.get('persona_entregada', 'unknown').replace(' ', '_')
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                
-                nombre_archivo = f"entrega_{ruta_id}_{persona}_{timestamp}.jpg"
-                ruta_foto_local = f"fotos_entregas/{nombre_archivo}"
-                
-                # Descargar foto
-                response = requests.get(foto_url, timeout=30)
-                if response.status_code == 200:
-                    with open(ruta_foto_local, 'wb') as f:
-                        f.write(response.content)
-                    
-                    # Actualizar datos con ruta local
-                    datos_entrega['foto_local'] = ruta_foto_local
-                    datos_entrega['foto_descargada'] = True
-                    self.gui.log(f"✅ Foto descargada: {ruta_foto_local}")
-                else:
-                    self.gui.log(f"⚠️ No se pudo descargar foto: {foto_url}")
-                    datos_entrega['foto_local'] = foto_url  # Mantener URL original
-            
-            return datos_entrega
-            
-        except Exception as e:
-            self.gui.log(f"⚠️ Error procesando foto: {str(e)}")
-            return datos_entrega
-
-    def _actualizar_excel_entrega(self, datos_entrega):
-        """Actualiza el Excel original con la entrega Y la foto - MEJORADO"""
-        try:
-            ruta_id = datos_entrega.get('ruta_id')
-            persona_entregada = datos_entrega.get('persona_entregada')
-            foto_acuse = datos_entrega.get('foto_local') or datos_entrega.get('foto_acuse', '')
-            repartidor = datos_entrega.get('repartidor', '')
-            timestamp = datos_entrega.get('timestamp', '')
-            
-            # Buscar archivo de ruta correspondiente
-            archivos_ruta = [f for f in os.listdir('rutas_telegram') 
-                           if f.startswith(f'Ruta_{ruta_id}_')]
-            
-            if not archivos_ruta:
-                self.gui.log(f"❌ No se encontró archivo de ruta para Ruta_{ruta_id}")
-                return False
-                
-            with open(f'rutas_telegram/{archivos_ruta[0]}', 'r', encoding='utf-8') as f:
-                ruta_data = json.load(f)
-            
-            excel_file = ruta_data.get('excel_original')
-            if not excel_file or not os.path.exists(excel_file):
-                self.gui.log(f"❌ Archivo Excel no encontrado: {excel_file}")
-                return False
-            
-            # Leer y actualizar Excel
-            df = pd.read_excel(excel_file)
-            
-            # 🆕 MEJORA: Buscar la fila correspondiente de manera más inteligente
-            persona_encontrada = False
-            for idx, fila in df.iterrows():
-                nombre_celda = str(fila.get('Nombre', '')).strip().lower()
-                persona_buscar = persona_entregada.strip().lower()
-                
-                # Búsqueda flexible: contiene o es similar
-                if (persona_buscar in nombre_celda or 
-                    nombre_celda in persona_buscar or
-                    self._nombres_similares(persona_buscar, nombre_celda)):
-                    
-                    # 🆕 ACTUALIZACIÓN COMPLETA
-                    df.at[idx, 'Acuse'] = f"✅ ENTREGADO - {timestamp}"
-                    df.at[idx, 'Repartidor'] = repartidor
-                    df.at[idx, 'Foto_Acuse'] = foto_acuse
-                    df.at[idx, 'Timestamp_Entrega'] = timestamp
-                    df.at[idx, 'Estado'] = 'ENTREGADO'
-                    
-                    # 🆕 Si existe columna de coordenadas, actualizar
-                    if 'Coordenadas' in df.columns:
-                        coords = datos_entrega.get('coords_entrega', '')
-                        if coords:
-                            df.at[idx, 'Coordenadas'] = coords
-                    
-                    persona_encontrada = True
-                    self.gui.log(f"📊 Excel actualizado para: {persona_entregada}")
-                    break
-            
-            if not persona_encontrada:
-                self.gui.log(f"⚠️ Persona no encontrada en Excel: {persona_entregada}")
-                # 🆕 Agregar como nueva fila al final
-                nueva_fila = {
-                    'Nombre': persona_entregada,
-                    'Acuse': f"✅ ENTREGADO - {timestamp}",
-                    'Repartidor': repartidor,
-                    'Foto_Acuse': foto_acuse,
-                    'Timestamp_Entrega': timestamp,
-                    'Estado': 'ENTREGADO'
-                }
-                df = pd.concat([df, pd.DataFrame([nueva_fila])], ignore_index=True)
-                self.gui.log(f"📝 Nueva fila agregada para: {persona_entregada}")
-            
-            # Guardar Excel actualizado
-            df.to_excel(excel_file, index=False)
-            self.gui.log(f"💾 Excel guardado: {os.path.basename(excel_file)}")
-            return True
-            
-        except Exception as e:
-            self.gui.log(f"❌ Error crítico actualizando Excel: {str(e)}")
-            return False
-
-    def _nombres_similares(self, nombre1, nombre2):
-        """Verifica si dos nombres son similares (para matching flexible)"""
-        # Eliminar títulos y palabras comunes
-        palabras_comunes = ['lic', 'lic.', 'ingeniero', 'ing', 'dr', 'doctor', 'mtro', 'maestro']
-        n1 = ' '.join([p for p in nombre1.split() if p.lower() not in palabras_comunes])
-        n2 = ' '.join([p for p in nombre2.split() if p.lower() not in palabras_comunes])
-        
-        # Verificar si comparten al menos 2 palabras
-        palabras1 = set(n1.lower().split())
-        palabras2 = set(n2.lower().split())
-        return len(palabras1.intersection(palabras2)) >= 2
-
-    def _actualizar_estado_ruta(self, datos_entrega):
-        """Actualiza el estado de la ruta en el archivo JSON"""
-        try:
-            ruta_id = datos_entrega.get('ruta_id')
-            archivos_ruta = [f for f in os.listdir('rutas_telegram') 
-                           if f.startswith(f'Ruta_{ruta_id}_')]
-            
-            if not archivos_ruta:
-                return False
-                
-            with open(f'rutas_telegram/{archivos_ruta[0]}', 'r', encoding='utf-8') as f:
-                ruta_data = json.load(f)
-            
-            # Actualizar parada completada
-            persona_entregada = datos_entrega.get('persona_entregada')
-            for parada in ruta_data.get('paradas', []):
-                if persona_entregada.lower() in parada.get('nombre', '').lower():
-                    parada['estado'] = 'entregado'
-                    parada['timestamp_entrega'] = datos_entrega.get('timestamp')
-                    parada['foto_acuse'] = datos_entrega.get('foto_local') or datos_entrega.get('foto_acuse', '')
-                    parada['repartidor'] = datos_entrega.get('repartidor', '')
-                    break
-            
-            # Verificar si todas las paradas están completadas
-            paradas_pendientes = [p for p in ruta_data.get('paradas', []) 
-                                if p.get('estado') != 'entregado']
-            
-            if not paradas_pendientes:
-                ruta_data['estado'] = 'completada'
-                ruta_data['timestamp_completada'] = datetime.now().isoformat()
-                self.gui.log(f"🎉 ¡Ruta {ruta_id} COMPLETADA!")
-            else:
-                ruta_data['estado'] = 'en_progreso'
-                progreso = len([p for p in ruta_data.get('paradas', []) if p.get('estado') == 'entregado'])
-                total = len(ruta_data.get('paradas', []))
-                self.gui.log(f"📊 Progreso Ruta {ruta_id}: {progreso}/{total} entregas")
-            
-            # Guardar archivo actualizado
-            with open(f'rutas_telegram/{archivos_ruta[0]}', 'w', encoding='utf-8') as f:
-                json.dump(ruta_data, f, indent=2, ensure_ascii=False)
-                
-            return True
-            
-        except Exception as e:
-            self.gui.log(f"❌ Error actualizando estado de ruta: {str(e)}")
-            return False
-    
-    def procesar_incidencia(self, datos_incidencia):
-        """Procesa una incidencia reportada por el bot CON FOTOS SEPARADAS"""
-        try:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            tipo_incidencia = datos_incidencia.get('tipo', 'incidencia')
-            
-            # 🆕 NUEVO: Procesar fotos de reportes
-            datos_incidencia = self._procesar_fotos_reporte(datos_incidencia)
-            
-            # Guardar metadata de la incidencia
-            archivo_incidencia = f"incidencias_trafico/incidencia_{timestamp}.json"
-            with open(archivo_incidencia, 'w', encoding='utf-8') as f:
-                json.dump(datos_incidencia, f, indent=2, ensure_ascii=False)
-            
-            self.gui.log(f"🚨 Incidencia reportada: {tipo_incidencia} con {len(datos_incidencia.get('fotos_locales', []))} fotos")
-            return True
-            
-        except Exception as e:
-            self.gui.log(f"❌ Error procesando incidencia: {str(e)}")
-            return False
-
-    def _procesar_fotos_reporte(self, datos_incidencia):
-        """Procesa y descarga fotos de reportes/incidencias"""
-        try:
-            fotos_urls = datos_incidencia.get('fotos', [])
-            fotos_locales = []
-            
-            for i, foto_url in enumerate(fotos_urls):
-                if foto_url.startswith('http'):
-                    # Generar nombre único
-                    tipo = datos_incidencia.get('tipo', 'reporte').replace(' ', '_')
-                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                    nombre_foto = f"reporte_{tipo}_{timestamp}_{i+1}.jpg"
-                    ruta_foto_local = f"fotos_reportes/{nombre_foto}"
-                    
-                    # Descargar foto
-                    response = requests.get(foto_url, timeout=30)
-                    if response.status_code == 200:
-                        with open(ruta_foto_local, 'wb') as f:
-                            f.write(response.content)
-                        
-                        fotos_locales.append(ruta_foto_local)
-                        self.gui.log(f"📸 Foto de reporte guardada: {ruta_foto_local}")
-                    else:
-                        self.gui.log(f"⚠️ No se pudo descargar foto de reporte: {foto_url}")
-                        fotos_locales.append(foto_url)  # Mantener URL original
-            
-            # Actualizar datos con rutas locales
-            datos_incidencia['fotos_locales'] = fotos_locales
-            return datos_incidencia
-            
-        except Exception as e:
-            self.gui.log(f"⚠️ Error procesando fotos de reporte: {str(e)}")
-            return datos_incidencia
-    
-    def obtener_rutas_pendientes(self):
-        """Obtiene lista de rutas disponibles para asignar"""
-        rutas = []
-        for archivo in os.listdir('rutas_telegram'):
-            if archivo.endswith('.json'):
-                with open(f'rutas_telegram/{archivo}', 'r', encoding='utf-8') as f:
-                    ruta_data = json.load(f)
-                    if ruta_data.get('estado') in ['pendiente', 'asignada']:
-                        paradas_entregadas = len([p for p in ruta_data.get('paradas', []) 
-                                                if p.get('estado') == 'entregado'])
-                        rutas.append({
-                            'archivo': archivo,
-                            'ruta_id': ruta_data.get('ruta_id'),
-                            'zona': ruta_data.get('zona'),
-                            'paradas_total': len(ruta_data.get('paradas', [])),
-                            'paradas_entregadas': paradas_entregadas,
-                            'repartidor': ruta_data.get('repartidor_asignado'),
-                            'estado': ruta_data.get('estado'),
-                            'progreso': f"{paradas_entregadas}/{len(ruta_data.get('paradas', []))}"
-                        })
-        return rutas
-    
     def obtener_avances_recientes(self, limite=10):
-        """Obtiene avances recientes para mostrar en GUI"""
-        avances = []
-        archivos = sorted(os.listdir('avances_ruta'), reverse=True)[:limite]
-        
-        for archivo in archivos:
-            try:
-                with open(f'avances_ruta/{archivo}', 'r') as f:
-                    datos = json.load(f)
-                    avances.append(datos)
-            except:
-                continue
-        return avances
-
-    def simular_entrega_bot(self, ruta_id, repartidor, persona_entregada):
-        """Simula una entrega del bot para pruebas CON FOTO"""
-        # Crear una foto de prueba (puede ser un archivo vacío o una imagen de prueba)
-        os.makedirs('fotos_entregas', exist_ok=True)
-        foto_prueba = f"fotos_entregas/entrega_prueba_{ruta_id}.jpg"
-        
-        # Crear archivo de prueba si no existe
-        if not os.path.exists(foto_prueba):
-            with open(foto_prueba, 'w') as f:
-                f.write("Foto de prueba - Simulación")
-        
-        datos_entrega = {
-            'ruta_id': ruta_id,
-            'repartidor': repartidor,
-            'persona_entregada': persona_entregada,
-            'foto_acuse': foto_prueba,
-            'foto_local': foto_prueba,
-            'timestamp': datetime.now().isoformat(),
-            'coords_entrega': '19.4326077,-99.133208',
-            'comentarios': 'Entregado en recepción - SIMULADO'
-        }
-        return self.procesar_entrega_repartidor(datos_entrega)
+        """Obtiene los avances más recientes de las rutas"""
+        try:
+            # Primero intentar obtener del bot en Railway
+            avances_bot = self.conexion.obtener_avances_pendientes()
+            
+            # También buscar en archivos locales
+            avances_locales = []
+            if os.path.exists("avances_ruta"):
+                archivos_avance = sorted(os.listdir("avances_ruta"), reverse=True)[:limite]
+                
+                for archivo in archivos_avance:
+                    if archivo.endswith('.json'):
+                        with open(f"avances_ruta/{archivo}", 'r', encoding='utf-8') as f:
+                            avance_data = json.load(f)
+                            avances_locales.append(avance_data)
+            
+            # Combinar y ordenar por timestamp
+            todos_avances = avances_bot + avances_locales
+            todos_avances.sort(key=lambda x: x.get('timestamp', ''), reverse=True)
+            
+            return todos_avances[:limite]
+            
+        except Exception as e:
+            self.gui.log(f"❌ Error obteniendo avances: {str(e)}")
+            return []
 
     def forzar_actualizacion_fotos(self):
-        """Fuerza la actualización de todas las fotos pendientes en Excel"""
+        """Fuerza la actualización de fotos en archivos Excel"""
         try:
-            self.gui.log("🔄 FORZANDO ACTUALIZACIÓN DE FOTOS EN EXCEL...")
-            
-            # Buscar todas las entregas procesadas
-            avances = self.obtener_avances_recientes(limite=100)
             actualizaciones = 0
             
-            for avance in avances:
-                if self._actualizar_excel_entrega(avance):
-                    actualizaciones += 1
+            # Obtener avances del bot
+            avances = self.conexion.obtener_avances_pendientes()
             
-            self.gui.log(f"✅ {actualizaciones} archivos Excel actualizados con fotos")
+            for avance in avances:
+                if self._procesar_avance_desde_bot(avance):
+                    actualizaciones += 1
+                    # Marcar como procesado en el bot
+                    avance_id = avance.get('id')
+                    if avance_id:
+                        self.conexion.marcar_avance_procesado(avance_id)
+            
+            self.gui.log(f"📸 Se actualizaron {actualizaciones} archivos Excel con fotos")
             return actualizaciones
             
         except Exception as e:
             self.gui.log(f"❌ Error forzando actualización: {str(e)}")
             return 0
+
+    def _procesar_avance_desde_bot(self, avance):
+        """Procesa un avance del bot y actualiza el Excel correspondiente"""
+        try:
+            ruta_id = avance.get('ruta_id')
+            persona_entregada = avance.get('persona_entregada', '').strip()
+            foto_ruta = avance.get('foto_local', '')
+            repartidor = avance.get('repartidor', '')
+            timestamp = avance.get('timestamp', '')
+            
+            if not persona_entregada or not ruta_id:
+                return False
+            
+            # Buscar archivo Excel de la ruta
+            archivos_encontrados = []
+            
+            for archivo in os.listdir("rutas_excel"):
+                if f"Ruta_{ruta_id}_" in archivo and archivo.endswith('.xlsx'):
+                    archivos_encontrados.append(archivo)
+            
+            if not archivos_encontrados:
+                self.gui.log(f"❌ No se encontró Excel para Ruta {ruta_id}")
+                return False
+            
+            excel_file = f"rutas_excel/{archivos_encontrados[0]}"
+            
+            # Leer y actualizar Excel
+            df = pd.read_excel(excel_file)
+            persona_encontrada = False
+            
+            # Búsqueda flexible del nombre
+            for idx, fila in df.iterrows():
+                nombre_en_excel = str(fila.get('Nombre', '')).strip().lower()
+                persona_buscar = persona_entregada.lower()
+                
+                # Buscar coincidencias (contiene o es similar)
+                if (persona_buscar in nombre_en_excel or 
+                    nombre_en_excel in persona_buscar or
+                    self._coincidencia_flexible_nombres(persona_buscar, nombre_en_excel)):
+                    
+                    # ACTUALIZAR EXCEL
+                    df.at[idx, 'Acuse'] = f"✅ ENTREGADO - {timestamp}"
+                    df.at[idx, 'Repartidor'] = repartidor
+                    df.at[idx, 'Foto_Acuse'] = foto_ruta
+                    df.at[idx, 'Timestamp_Entrega'] = timestamp
+                    df.at[idx, 'Estado'] = 'ENTREGADO'
+                    
+                    persona_encontrada = True
+                    self.gui.log(f"✅ Excel actualizado: {persona_entregada} → {nombre_en_excel}")
+                    break
+            
+            if persona_encontrada:
+                # Guardar cambios en Excel
+                df.to_excel(excel_file, index=False)
+                self.gui.log(f"💾 Excel guardado: {os.path.basename(excel_file)}")
+                return True
+            else:
+                self.gui.log(f"⚠️ '{persona_entregada}' no encontrado en Ruta {ruta_id}")
+                return False
+                
+        except Exception as e:
+            self.gui.log(f"❌ Error procesando avance: {str(e)}")
+            return False
+
+    def _coincidencia_flexible_nombres(self, nombre1, nombre2):
+        """Coincidencia inteligente de nombres"""
+        # Eliminar títulos comunes
+        palabras_comunes = ['lic', 'lic.', 'ingeniero', 'ing', 'dr', 'doctor', 'mtro', 'maestro', 'sr', 'sra']
+        
+        n1_clean = ' '.join([p for p in nombre1.split() if p.lower() not in palabras_comunes])
+        n2_clean = ' '.join([p for p in nombre2.split() if p.lower() not in palabras_comunes])
+        
+        # Coincidencia por palabras clave
+        palabras1 = set(n1_clean.lower().split())
+        palabras2 = set(n2_clean.lower().split())
+        
+        return len(palabras1.intersection(palabras2)) >= 2
+
+    def simular_entrega_bot(self, ruta_id, repartidor, persona):
+        """Simula una entrega para pruebas del sistema"""
+        try:
+            # Crear avance simulado
+            avance_simulado = {
+                'ruta_id': ruta_id,
+                'repartidor': repartidor,
+                'persona_entregada': persona,
+                'timestamp': datetime.now().isoformat(),
+                'foto_local': f"fotos_entregas/entrega_simulada_{ruta_id}.jpg",
+                'tipo': 'entrega_simulada'
+            }
+            
+            # Guardar avance localmente
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            archivo_avance = f"avances_ruta/avance_{timestamp}.json"
+            
+            with open(archivo_avance, 'w', encoding='utf-8') as f:
+                json.dump(avance_simulado, f, indent=2, ensure_ascii=False)
+            
+            # Actualizar Excel correspondiente
+            self._procesar_avance_desde_bot(avance_simulado)
+            
+            self.gui.log(f"🧪 Entrega simulada: {persona} por {repartidor}")
+            return True
+            
+        except Exception as e:
+            self.gui.log(f"❌ Error en simulación: {str(e)}")
+            return False
 
 # =============================================================================
 # CLASE PRINCIPAL - MOTOR DE RUTAS (CoreRouteGenerator) - MANTENIDO
@@ -807,7 +681,7 @@ class CoreRouteGenerator:
         return self.results
 
 # =============================================================================
-# CLASE INTERFAZ GRÁFICA (SistemaRutasGUI) - COMPLETAMENTE MEJORADA
+# CLASE INTERFAZ GRÁFICA (SistemaRutasGUI) - VERSIÓN CORREGIDA
 # =============================================================================
 class SistemaRutasGUI:
     def __init__(self, root):
@@ -828,10 +702,325 @@ class SistemaRutasGUI:
         self.columnas_seleccionadas = None
         self.gestor_telegram = GestorTelegram(self)
         
+        # 🆕 NUEVO: VARIABLES PARA SINCRONIZACIÓN AUTOMÁTICA
+        self.sincronizando = False
+        self.sincronizacion_thread = None
+        
         self.setup_ui()
         
         # 🆕 NUEVO: Solo UNA llamada aquí
         self.root.after(1000, self.cargar_excel_desde_github)
+
+    def setup_ui(self):
+        main_frame = ttk.Frame(self.root, padding="10")
+        main_frame.pack(fill=tk.BOTH, expand=True)
+        
+        header_frame = ttk.Frame(main_frame)
+        header_frame.pack(fill=tk.X, pady=(0, 20))
+        ttk.Label(header_frame, text="SISTEMA RUTAS PRO ULTRA HD - CON FOTOS", font=('Arial', 16, 'bold'), foreground='#2c3e50').pack()
+        ttk.Label(header_frame, text="Gestión completa de entregas con evidencias fotográficas", font=('Arial', 10), foreground='#7f8c8d').pack()
+        
+        config_frame = ttk.LabelFrame(main_frame, text="Configuración", padding="15")
+        config_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        file_frame = ttk.Frame(config_frame)
+        file_frame.pack(fill=tk.X, pady=5)
+        ttk.Label(file_frame, text="Archivo Excel:", width=12).pack(side=tk.LEFT)
+        self.file_label = ttk.Label(file_frame, text="No seleccionado", foreground='red')
+        self.file_label.pack(side=tk.LEFT, padx=(10, 10))
+        ttk.Button(file_frame, text="Examinar", command=self.cargar_excel).pack(side=tk.LEFT)
+        
+        api_frame = ttk.Frame(config_frame)
+        api_frame.pack(fill=tk.X, pady=5)
+        ttk.Label(api_frame, text="API Key Google:", width=12).pack(side=tk.LEFT)
+        self.api_entry = ttk.Entry(api_frame, width=40, show="*")
+        self.api_entry.pack(side=tk.LEFT, padx=(10, 10))
+        ttk.Button(api_frame, text="Configurar", command=self.configurar_api).pack(side=tk.LEFT)
+        
+        params_frame = ttk.Frame(config_frame)
+        params_frame.pack(fill=tk.X, pady=5)
+        ttk.Label(params_frame, text="Máx por ruta:").pack(side=tk.LEFT)
+        self.max_spinbox = ttk.Spinbox(params_frame, from_=1, to=20, width=5)
+        self.max_spinbox.set(8)
+        self.max_spinbox.pack(side=tk.LEFT, padx=(5, 20))
+        
+        ttk.Label(params_frame, text="Origen:").pack(side=tk.LEFT)
+        self.origen_entry = ttk.Entry(params_frame, width=30)
+        self.origen_entry.insert(0, self.origen_coords)
+        self.origen_entry.pack(side=tk.LEFT, padx=(5, 5))
+        
+        ttk.Label(params_frame, text="Nombre:").pack(side=tk.LEFT)
+        self.nombre_entry = ttk.Entry(params_frame, width=25)
+        self.nombre_entry.insert(0, self.origen_name)
+        self.nombre_entry.pack(side=tk.LEFT, padx=(5, 0))
+        
+        control_frame = ttk.LabelFrame(main_frame, text="Control de Procesamiento", padding="15")
+        control_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        btn_frame = ttk.Frame(control_frame)
+        btn_frame.pack(fill=tk.X)
+        self.btn_generar = ttk.Button(btn_frame, text="GENERAR RUTAS OPTIMIZADAS", command=self.generar_rutas, state='disabled')
+        self.btn_generar.pack(side=tk.LEFT, padx=(0, 10))
+        
+        ttk.Button(btn_frame, text="ABRIR CARPETA MAPAS", command=lambda: self.abrir_carpeta('mapas_pro')).pack(side=tk.LEFT, padx=(0, 10))
+        ttk.Button(btn_frame, text="ABRIR CARPETA EXCEL", command=lambda: self.abrir_carpeta('rutas_excel')).pack(side=tk.LEFT, padx=(0, 10))
+        ttk.Button(btn_frame, text="VER RESUMEN", command=self.mostrar_resumen).pack(side=tk.LEFT, padx=(0, 10))
+        
+        self.btn_refresh = ttk.Button(btn_frame, text="REFRESH", command=self.refresh_sistema)
+        self.btn_refresh.pack(side=tk.LEFT, padx=(0, 10))
+
+        # 🆕 NUEVO: BOTONES MEJORADOS PARA GESTIÓN DE FOTOS
+        fotos_frame = ttk.LabelFrame(main_frame, text="Gestión de Fotos y Evidencias", padding="15")
+        fotos_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        fotos_btn_frame = ttk.Frame(fotos_frame)
+        fotos_btn_frame.pack(fill=tk.X)
+        
+        ttk.Button(fotos_btn_frame, text="📸 VER FOTOS ENTREGAS", 
+                  command=self.ver_fotos_entregas).pack(side=tk.LEFT, padx=(0, 10))
+        
+        ttk.Button(fotos_btn_frame, text="🖼️ VER FOTOS REPORTES", 
+                  command=self.ver_fotos_reportes).pack(side=tk.LEFT, padx=(0, 10))
+        
+        ttk.Button(fotos_btn_frame, text="🔄 ACTUALIZAR FOTOS EXCEL", 
+                  command=self.forzar_actualizacion_fotos).pack(side=tk.LEFT, padx=(0, 10))
+        
+        ttk.Button(fotos_btn_frame, text="📊 VER ESTADO RUTAS", 
+                  command=self.ver_estado_rutas).pack(side=tk.LEFT, padx=(0, 10))
+
+        # 🆕 NUEVO: BOTÓN DE SINCRONIZACIÓN AUTOMÁTICA (AGREGADO AQUÍ)
+        self.btn_sincronizacion_auto = ttk.Button(fotos_btn_frame, 
+                                                text="🔄 INICIAR SINCRONIZACIÓN AUTO",
+                                                command=self.toggle_sincronizacion_auto)
+        self.btn_sincronizacion_auto.pack(side=tk.LEFT, padx=(0, 10))
+
+        # 🆕 NUEVO: BOTONES PARA TELEGRAM
+        telegram_frame = ttk.Frame(control_frame)
+        telegram_frame.pack(fill=tk.X, pady=(10, 0))
+        
+        ttk.Button(telegram_frame, text="📱 ASIGNAR RUTAS A REPARTIDORES", 
+                  command=self.asignar_rutas_telegram).pack(side=tk.LEFT, padx=(0, 10))
+        
+        ttk.Button(telegram_frame, text="🔄 ACTUALIZAR AVANCES", 
+                  command=self.actualizar_avances).pack(side=tk.LEFT, padx=(0, 10))
+        
+        ttk.Button(telegram_frame, text="🧪 SIMULAR ENTREGA", 
+                  command=self.simular_entrega_prueba).pack(side=tk.LEFT, padx=(0, 10))
+        
+        self.progress_frame = ttk.Frame(control_frame)
+        self.progress_frame.pack(fill=tk.X, pady=(10, 0))
+        self.progress_bar = ttk.Progressbar(self.progress_frame, mode='indeterminate')
+        self.progress_bar.pack(fill=tk.X)
+        self.progress_label = ttk.Label(self.progress_frame, text="Listo para comenzar")
+        self.progress_label.pack()
+        
+        log_frame = ttk.LabelFrame(main_frame, text="Log del Sistema", padding="10")
+        log_frame.pack(fill=tk.BOTH, expand=True)
+        self.log_text = scrolledtext.ScrolledText(log_frame, height=20, wrap=tk.WORD)
+        self.log_text.pack(fill=tk.BOTH, expand=True)
+
+    # 🆕 NUEVAS FUNCIONES DE SINCRONIZACIÓN AUTOMÁTICA
+    def toggle_sincronizacion_auto(self):
+        """Activar/desactivar sincronización automática"""
+        if not self.sincronizando:
+            self.iniciar_sincronizacion_auto()
+        else:
+            self.detener_sincronizacion_auto()
+
+    def iniciar_sincronizacion_auto(self):
+        """Iniciar sincronización automática cada 5 minutos"""
+        try:
+            self.sincronizando = True
+            self.btn_sincronizacion_auto.config(text="🔄 DETENER SINCRONIZACIÓN AUTO")
+            self.log("🎯 SINCRONIZACIÓN AUTOMÁTICA ACTIVADA - Cada 5 minutos")
+            
+            # Iniciar en hilo separado
+            self.sincronizacion_thread = threading.Thread(target=self._sincronizacion_background, daemon=True)
+            self.sincronizacion_thread.start()
+            
+        except Exception as e:
+            self.log(f"❌ Error iniciando sincronización automática: {str(e)}")
+
+    def detener_sincronizacion_auto(self):
+        """Detener sincronización automática"""
+        try:
+            self.sincronizando = False
+            self.btn_sincronizacion_auto.config(text="🔄 INICIAR SINCRONIZACIÓN AUTO")
+            self.log("⏹️ SINCRONIZACIÓN AUTOMÁTICA DETENIDA")
+            
+        except Exception as e:
+            self.log(f"❌ Error deteniendo sincronización automática: {str(e)}")
+
+    def _sincronizacion_background(self):
+        """Sincronización en segundo plano cada 5 minutos"""
+        ciclo = 0
+        while self.sincronizando:
+            try:
+                ciclo += 1
+                self.log(f"🔄 CICLO {ciclo}: Sincronizando automáticamente...")
+                
+                # Llamar a la sincronización existente
+                self.sincronizar_con_bot()
+                
+                # Esperar 5 minutos (300 segundos)
+                for i in range(300):
+                    if not self.sincronizando:
+                        break
+                    time.sleep(1)
+                    
+            except Exception as e:
+                self.log(f"❌ Error en ciclo {ciclo}: {str(e)}")
+                # Reintentar en 1 minuto si hay error
+                for i in range(60):
+                    if not self.sincronizando:
+                        break
+                    time.sleep(1)
+
+    def sincronizar_con_bot(self):
+        """Sincroniza todos los Excel con los datos más recientes del bot - VERSIÓN MEJORADA"""
+        try:
+            self.log("🔄 CONECTANDO CON BOT...")
+            
+            RAILWAY_URL = "https://monitoring-routes-pjcdmx-production.up.railway.app"
+            
+            # 1. Verificar que el bot está vivo
+            health_response = requests.get(f"{RAILWAY_URL}/api/health", timeout=10)
+            if health_response.status_code != 200:
+                self.log("❌ Bot no responde - Verifica la conexión")
+                return False
+            
+            # 2. Obtener avances pendientes del bot
+            self.log("📥 DESCARGANDO AVANCES PENDIENTES...")
+            avances_response = requests.get(f"{RAILWAY_URL}/api/avances_pendientes", timeout=30)
+            
+            if avances_response.status_code == 200:
+                datos = avances_response.json()
+                avances = datos.get('avances', [])
+                total_avances = len(avances)
+                
+                self.log(f"📊 AVANCES ENCONTRADOS: {total_avances}")
+                
+                if total_avances == 0:
+                    self.log("✅ No hay avances pendientes por sincronizar")
+                    return True
+                
+                # 3. Procesar cada avance
+                actualizaciones_exitosas = 0
+                avances_con_error = 0
+                
+                for i, avance in enumerate(avances, 1):
+                    self.log(f"📦 Procesando avance {i}/{total_avances}: {avance.get('persona_entregada', 'N/A')}")
+                    
+                    if self._procesar_avance_desde_bot(avance):
+                        actualizaciones_exitosas += 1
+                    else:
+                        avances_con_error += 1
+                
+                # 4. Reporte final
+                mensaje_final = f"✅ SINCRONIZACIÓN COMPLETADA: {actualizaciones_exitosas} actualizaciones exitosas"
+                if avances_con_error > 0:
+                    mensaje_final += f", {avances_con_error} con errores"
+                
+                self.log(mensaje_final)
+                
+                # Mostrar resumen si hay actualizaciones
+                if actualizaciones_exitosas > 0:
+                    messagebox.showinfo("Sincronización Exitosa", 
+                                      f"Se actualizaron {actualizaciones_exitosas} archivos Excel")
+                
+                return actualizaciones_exitosas > 0
+                
+            else:
+                self.log("❌ Error obteniendo avances del bot")
+                return False
+                
+        except requests.exceptions.Timeout:
+            self.log("⏰ Timeout - El bot no respondió a tiempo")
+            return False
+        except requests.exceptions.ConnectionError:
+            self.log("🔌 Error de conexión - Verifica tu internet")
+            return False
+        except Exception as e:
+            self.log(f"❌ Error crítico en sincronización: {str(e)}")
+            return False
+
+    def _procesar_avance_desde_bot(self, avance):
+        """Procesa un avance individual del bot y actualiza el Excel correspondiente"""
+        try:
+            ruta_id = avance.get('ruta_id')
+            persona_entregada = avance.get('persona_entregada', '').strip()
+            foto_ruta = avance.get('foto_local', '')
+            repartidor = avance.get('repartidor', '')
+            timestamp = avance.get('timestamp', '')
+            
+            if not persona_entregada or not ruta_id:
+                self.log("⚠️ Avance incompleto - saltando")
+                return False
+            
+            # Buscar archivo Excel de la ruta
+            archivos_encontrados = []
+            
+            for archivo in os.listdir("rutas_excel"):
+                if f"Ruta_{ruta_id}_" in archivo and archivo.endswith('.xlsx'):
+                    archivos_encontrados.append(archivo)
+            
+            if not archivos_encontrados:
+                self.log(f"❌ No se encontró Excel para Ruta {ruta_id}")
+                return False
+            
+            excel_file = f"rutas_excel/{archivos_encontrados[0]}"
+            
+            # Leer y actualizar Excel
+            df = pd.read_excel(excel_file)
+            persona_encontrada = False
+            
+            # Búsqueda flexible del nombre
+            for idx, fila in df.iterrows():
+                nombre_en_excel = str(fila.get('Nombre', '')).strip().lower()
+                persona_buscar = persona_entregada.lower()
+                
+                # Buscar coincidencias (contiene o es similar)
+                if (persona_buscar in nombre_en_excel or 
+                    nombre_en_excel in persona_buscar or
+                    self._coincidencia_flexible_nombres(persona_buscar, nombre_en_excel)):
+                    
+                    # ACTUALIZAR EXCEL
+                    df.at[idx, 'Acuse'] = f"✅ ENTREGADO - {timestamp}"
+                    df.at[idx, 'Repartidor'] = repartidor
+                    df.at[idx, 'Foto_Acuse'] = foto_ruta
+                    df.at[idx, 'Timestamp_Entrega'] = timestamp
+                    df.at[idx, 'Estado'] = 'ENTREGADO'
+                    
+                    persona_encontrada = True
+                    self.log(f"✅ Excel actualizado: {persona_entregada} → {nombre_en_excel}")
+                    break
+            
+            if persona_encontrada:
+                # Guardar cambios en Excel
+                df.to_excel(excel_file, index=False)
+                self.log(f"💾 Excel guardado: {os.path.basename(excel_file)}")
+                return True
+            else:
+                self.log(f"⚠️ '{persona_entregada}' no encontrado en Ruta {ruta_id}")
+                return False
+                
+        except Exception as e:
+            self.log(f"❌ Error procesando avance: {str(e)}")
+            return False
+
+    def _coincidencia_flexible_nombres(self, nombre1, nombre2):
+        """Coincidencia inteligente de nombres"""
+        # Eliminar títulos comunes
+        palabras_comunes = ['lic', 'lic.', 'ingeniero', 'ing', 'dr', 'doctor', 'mtro', 'maestro', 'sr', 'sra']
+        
+        n1_clean = ' '.join([p for p in nombre1.split() if p.lower() not in palabras_comunes])
+        n2_clean = ' '.join([p for p in nombre2.split() if p.lower() not in palabras_comunes])
+        
+        # Coincidencia por palabras clave
+        palabras1 = set(n1_clean.lower().split())
+        palabras2 = set(n2_clean.lower().split())
+        
+        return len(palabras1.intersection(palabras2)) >= 2
     
     def cargar_excel_desde_github(self):
         """Cargar automáticamente el Excel de GitHub y configurar API"""
@@ -989,108 +1178,6 @@ class SistemaRutasGUI:
         self.root.wait_window(seleccion_window)
         
         return resultado
-
-    def setup_ui(self):
-        main_frame = ttk.Frame(self.root, padding="10")
-        main_frame.pack(fill=tk.BOTH, expand=True)
-        
-        header_frame = ttk.Frame(main_frame)
-        header_frame.pack(fill=tk.X, pady=(0, 20))
-        ttk.Label(header_frame, text="SISTEMA RUTAS PRO ULTRA HD - CON FOTOS", font=('Arial', 16, 'bold'), foreground='#2c3e50').pack()
-        ttk.Label(header_frame, text="Gestión completa de entregas con evidencias fotográficas", font=('Arial', 10), foreground='#7f8c8d').pack()
-        
-        config_frame = ttk.LabelFrame(main_frame, text="Configuración", padding="15")
-        config_frame.pack(fill=tk.X, pady=(0, 10))
-        
-        file_frame = ttk.Frame(config_frame)
-        file_frame.pack(fill=tk.X, pady=5)
-        ttk.Label(file_frame, text="Archivo Excel:", width=12).pack(side=tk.LEFT)
-        self.file_label = ttk.Label(file_frame, text="No seleccionado", foreground='red')
-        self.file_label.pack(side=tk.LEFT, padx=(10, 10))
-        ttk.Button(file_frame, text="Examinar", command=self.cargar_excel).pack(side=tk.LEFT)
-        
-        api_frame = ttk.Frame(config_frame)
-        api_frame.pack(fill=tk.X, pady=5)
-        ttk.Label(api_frame, text="API Key Google:", width=12).pack(side=tk.LEFT)
-        self.api_entry = ttk.Entry(api_frame, width=40, show="*")
-        self.api_entry.pack(side=tk.LEFT, padx=(10, 10))
-        ttk.Button(api_frame, text="Configurar", command=self.configurar_api).pack(side=tk.LEFT)
-        
-        params_frame = ttk.Frame(config_frame)
-        params_frame.pack(fill=tk.X, pady=5)
-        ttk.Label(params_frame, text="Máx por ruta:").pack(side=tk.LEFT)
-        self.max_spinbox = ttk.Spinbox(params_frame, from_=1, to=20, width=5)
-        self.max_spinbox.set(8)
-        self.max_spinbox.pack(side=tk.LEFT, padx=(5, 20))
-        
-        ttk.Label(params_frame, text="Origen:").pack(side=tk.LEFT)
-        self.origen_entry = ttk.Entry(params_frame, width=30)
-        self.origen_entry.insert(0, self.origen_coords)
-        self.origen_entry.pack(side=tk.LEFT, padx=(5, 5))
-        
-        ttk.Label(params_frame, text="Nombre:").pack(side=tk.LEFT)
-        self.nombre_entry = ttk.Entry(params_frame, width=25)
-        self.nombre_entry.insert(0, self.origen_name)
-        self.nombre_entry.pack(side=tk.LEFT, padx=(5, 0))
-        
-        control_frame = ttk.LabelFrame(main_frame, text="Control de Procesamiento", padding="15")
-        control_frame.pack(fill=tk.X, pady=(0, 10))
-        
-        btn_frame = ttk.Frame(control_frame)
-        btn_frame.pack(fill=tk.X)
-        self.btn_generar = ttk.Button(btn_frame, text="GENERAR RUTAS OPTIMIZADAS", command=self.generar_rutas, state='disabled')
-        self.btn_generar.pack(side=tk.LEFT, padx=(0, 10))
-        
-        ttk.Button(btn_frame, text="ABRIR CARPETA MAPAS", command=lambda: self.abrir_carpeta('mapas_pro')).pack(side=tk.LEFT, padx=(0, 10))
-        ttk.Button(btn_frame, text="ABRIR CARPETA EXCEL", command=lambda: self.abrir_carpeta('rutas_excel')).pack(side=tk.LEFT, padx=(0, 10))
-        ttk.Button(btn_frame, text="VER RESUMEN", command=self.mostrar_resumen).pack(side=tk.LEFT, padx=(0, 10))
-        
-        self.btn_refresh = ttk.Button(btn_frame, text="REFRESH", command=self.refresh_sistema)
-        self.btn_refresh.pack(side=tk.LEFT, padx=(0, 10))
-
-        # 🆕 NUEVO: BOTONES MEJORADOS PARA GESTIÓN DE FOTOS
-        fotos_frame = ttk.LabelFrame(main_frame, text="Gestión de Fotos y Evidencias", padding="15")
-        fotos_frame.pack(fill=tk.X, pady=(0, 10))
-        
-        fotos_btn_frame = ttk.Frame(fotos_frame)
-        fotos_btn_frame.pack(fill=tk.X)
-        
-        ttk.Button(fotos_btn_frame, text="📸 VER FOTOS ENTREGAS", 
-                  command=self.ver_fotos_entregas).pack(side=tk.LEFT, padx=(0, 10))
-        
-        ttk.Button(fotos_btn_frame, text="🖼️ VER FOTOS REPORTES", 
-                  command=self.ver_fotos_reportes).pack(side=tk.LEFT, padx=(0, 10))
-        
-        ttk.Button(fotos_btn_frame, text="🔄 ACTUALIZAR FOTOS EXCEL", 
-                  command=self.forzar_actualizacion_fotos).pack(side=tk.LEFT, padx=(0, 10))
-        
-        ttk.Button(fotos_btn_frame, text="📊 VER ESTADO RUTAS", 
-                  command=self.ver_estado_rutas).pack(side=tk.LEFT, padx=(0, 10))
-
-        # 🆕 NUEVO: BOTONES PARA TELEGRAM
-        telegram_frame = ttk.Frame(control_frame)
-        telegram_frame.pack(fill=tk.X, pady=(10, 0))
-        
-        ttk.Button(telegram_frame, text="📱 ASIGNAR RUTAS A REPARTIDORES", 
-                  command=self.asignar_rutas_telegram).pack(side=tk.LEFT, padx=(0, 10))
-        
-        ttk.Button(telegram_frame, text="🔄 ACTUALIZAR AVANCES", 
-                  command=self.actualizar_avances).pack(side=tk.LEFT, padx=(0, 10))
-        
-        ttk.Button(telegram_frame, text="🧪 SIMULAR ENTREGA", 
-                  command=self.simular_entrega_prueba).pack(side=tk.LEFT, padx=(0, 10))
-        
-        self.progress_frame = ttk.Frame(control_frame)
-        self.progress_frame.pack(fill=tk.X, pady=(10, 0))
-        self.progress_bar = ttk.Progressbar(self.progress_frame, mode='indeterminate')
-        self.progress_bar.pack(fill=tk.X)
-        self.progress_label = ttk.Label(self.progress_frame, text="Listo para comenzar")
-        self.progress_label.pack()
-        
-        log_frame = ttk.LabelFrame(main_frame, text="Log del Sistema", padding="10")
-        log_frame.pack(fill=tk.BOTH, expand=True)
-        self.log_text = scrolledtext.ScrolledText(log_frame, height=20, wrap=tk.WORD)
-        self.log_text.pack(fill=tk.BOTH, expand=True)
 
     # 🆕 NUEVAS FUNCIONES PARA GESTIÓN DE FOTOS
     def ver_fotos_entregas(self):
@@ -1466,7 +1553,6 @@ class SistemaRutasGUI:
             self.log("💡 Revisa el Excel correspondiente para ver la actualización")
         else:
             self.log("❌ SIMULACIÓN: Error en la entrega")
-
 # =============================================================================
 # EJECUCIÓN PRINCIPAL
 # =============================================================================
