@@ -1215,6 +1215,225 @@ def forzar_actualizacion_excel():
         return jsonify({"status": "error", "error": str(e)}), 500
 
 # =============================================================================
+# ENDPOINTS PARA VISUALIZACIÓN DE FOTOS - CORREGIDOS
+# =============================================================================
+
+@app.route('/galeria_carpetas')
+def galeria_carpetas():
+    """Página para navegar por las carpetas de fotos"""
+    try:
+        html = """
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>📸 Galería Organizada - PJCDMX</title>
+            <meta charset="utf-8">
+            <style>
+                body { 
+                    font-family: Arial, sans-serif; 
+                    margin: 20px; 
+                    background: #f5f5f5; 
+                    line-height: 1.6;
+                }
+                .header {
+                    background: #2c3e50;
+                    color: white;
+                    padding: 20px;
+                    border-radius: 10px;
+                    margin-bottom: 20px;
+                }
+                .carpeta { 
+                    background: white; 
+                    padding: 20px; 
+                    margin: 15px 0; 
+                    border-radius: 10px; 
+                    box-shadow: 0 2px 5px rgba(0,0,0,0.1); 
+                }
+                .carpeta h2 { 
+                    margin-top: 0; 
+                    color: #333; 
+                    border-bottom: 2px solid;
+                    padding-bottom: 10px;
+                }
+                .entregas { border-left: 5px solid #28a745; }
+                .entregas h2 { color: #28a745; }
+                .incidentes { border-left: 5px solid #dc3545; }
+                .incidentes h2 { color: #dc3545; }
+                .estatus { border-left: 5px solid #ffc107; }
+                .estatus h2 { color: #ffc107; }
+                .general { border-left: 5px solid #17a2b8; }
+                .general h2 { color: #17a2b8; }
+                .fotos { 
+                    display: flex; 
+                    flex-wrap: wrap; 
+                    gap: 15px; 
+                    margin-top: 15px; 
+                }
+                .foto-item {
+                    text-align: center;
+                }
+                .fotos img { 
+                    max-width: 200px; 
+                    max-height: 150px;
+                    border-radius: 8px; 
+                    border: 2px solid #ddd;
+                    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                    transition: transform 0.3s ease;
+                }
+                .fotos img:hover {
+                    transform: scale(1.05);
+                    border-color: #007bff;
+                }
+                .foto-nombre {
+                    font-size: 12px;
+                    color: #666;
+                    margin-top: 5px;
+                    word-break: break-all;
+                    max-width: 200px;
+                }
+                .vacio { 
+                    color: #666; 
+                    font-style: italic;
+                    padding: 20px;
+                    text-align: center;
+                }
+                .contador {
+                    background: #e9ecef;
+                    padding: 5px 10px;
+                    border-radius: 15px;
+                    font-size: 14px;
+                    margin-left: 10px;
+                }
+                .carpeta-info {
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                }
+            </style>
+        </head>
+        <body>
+            <div class="header">
+                <h1>📸 Galería Organizada de Fotos</h1>
+                <p>Sistema de Rutas PJCDMX - Fotos clasificadas automáticamente</p>
+                <small>Actualizado: """ + datetime.now().strftime("%Y-%m-%d %H:%M:%S") + """</small>
+            </div>
+        """
+        
+        carpetas = {
+            'entregas': '📦 Entregas y Acuses',
+            'incidentes': '🚨 Incidentes y Problemas', 
+            'estatus': '📊 Estatus y Actualizaciones',
+            'general': '📸 Fotos Generales'
+        }
+        
+        for carpeta, nombre in carpetas.items():
+            ruta_carpeta = f'carpeta_fotos_central/{carpeta}'
+            html += f'<div class="carpeta {carpeta}">'
+            html += f'<div class="carpeta-info">'
+            html += f'<h2>{nombre}</h2>'
+            
+            if os.path.exists(ruta_carpeta):
+                fotos = [f for f in os.listdir(ruta_carpeta) 
+                        if f.lower().endswith(('.jpg', '.jpeg', '.png', '.gif'))]
+                html += f'<span class="contador">{len(fotos)} fotos</span>'
+            html += '</div>'
+            
+            if os.path.exists(ruta_carpeta):
+                fotos = [f for f in os.listdir(ruta_carpeta) 
+                        if f.lower().endswith(('.jpg', '.jpeg', '.png', '.gif'))]
+                
+                if fotos:
+                    html += '<div class="fotos">'
+                    for foto in sorted(fotos)[:12]:  # Mostrar máximo 12 fotos
+                        html += f'''
+                        <div class="foto-item">
+                            <a href="/carpeta_fotos_central/{carpeta}/{foto}" target="_blank">
+                                <img src="/carpeta_fotos_central/{carpeta}/{foto}" 
+                                     alt="{foto}" 
+                                     title="{foto}">
+                            </a>
+                            <div class="foto-nombre">{foto[:20]}...</div>
+                        </div>
+                        '''
+                    if len(fotos) > 12:
+                        html += f'<div class="vacio">... y {len(fotos) - 12} fotos más</div>'
+                    html += '</div>'
+                else:
+                    html += '<div class="vacio">No hay fotos en esta categoría</div>'
+            else:
+                html += '<div class="vacio">Carpeta no existe</div>'
+            
+            html += '</div>'
+        
+        html += """
+            <div style="margin-top: 30px; padding: 20px; background: white; border-radius: 10px;">
+                <h3>📋 Resumen del Sistema</h3>
+                <p><strong>Total de rutas generadas:</strong> """ + str(len([f for f in os.listdir('rutas_telegram') if f.endswith('.json')])) + """</p>
+                <p><strong>Total de fotos en sistema:</strong> """ + str(sum(len([f for f in os.listdir(f'carpeta_fotos_central/{carpeta}') 
+                    if f.lower().endswith(('.jpg', '.jpeg', '.png', '.gif'))]) 
+                    for carpeta in ['entregas', 'incidentes', 'estatus', 'general'] 
+                    if os.path.exists(f'carpeta_fotos_central/{carpeta}'))) + """</p>
+            </div>
+        </body>
+        </html>
+        """
+        return html
+        
+    except Exception as e:
+        return f"Error generando galería: {str(e)}", 500
+
+@app.route('/carpeta_fotos_central/<path:filename>')
+def servir_foto_carpeta(filename):
+    """Servir fotos desde la carpeta central"""
+    try:
+        # Verificar que el archivo existe y es seguro
+        safe_path = os.path.join('carpeta_fotos_central', filename)
+        if not os.path.exists(safe_path):
+            return "Foto no encontrada", 404
+        
+        # Verificar que es una imagen
+        if not filename.lower().endswith(('.jpg', '.jpeg', '.png', '.gif')):
+            return "Tipo de archivo no permitido", 400
+            
+        return send_file(safe_path)
+    except Exception as e:
+        return f"Error cargando foto: {str(e)}", 500
+
+@app.route('/api/estado_fotos')
+def estado_fotos():
+    """API para ver el estado de las fotos"""
+    try:
+        resultado = {
+            'status': 'success',
+            'timestamp': datetime.now().isoformat(),
+            'carpetas': {}
+        }
+        
+        carpetas = ['entregas', 'incidentes', 'estatus', 'general']
+        
+        for carpeta in carpetas:
+            ruta = f'carpeta_fotos_central/{carpeta}'
+            if os.path.exists(ruta):
+                fotos = [f for f in os.listdir(ruta) 
+                        if f.lower().endswith(('.jpg', '.jpeg', '.png', '.gif'))]
+                resultado['carpetas'][carpeta] = {
+                    'existe': True,
+                    'total_fotos': len(fotos),
+                    'fotos': fotos[:10]  # Primeras 10 fotos
+                }
+            else:
+                resultado['carpetas'][carpeta] = {
+                    'existe': False,
+                    'total_fotos': 0,
+                    'fotos': []
+                }
+        
+        return jsonify(resultado)
+        
+    except Exception as e:
+        return jsonify({'status': 'error', 'error': str(e)}), 500
+
+# =============================================================================
 # INICIALIZACIÓN Y EJECUCIÓN
 # =============================================================================
 
