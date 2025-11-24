@@ -71,7 +71,6 @@ class ConexionBotRailway:
             print(f"❌ Error descargando foto: {e}")
             return False
 
-    # 🆕 AGREGAR ESTOS MÉTODOS FALTANTES:
     def obtener_avances_pendientes(self):
         """Obtiene avances pendientes de sincronización del bot"""
         try:
@@ -876,66 +875,65 @@ class SistemaRutasGUI:
                         break
                     time.sleep(1)
 
-# Y EN LA FUNCIÓN sincronizar_con_bot, CAMBIA:
-def sincronizar_con_bot(self):
-    """Sincroniza todos los Excel con los datos más recientes del bot"""
-    try:
-        self.log("🔄 CONECTANDO CON BOT...")
-        
-        # 🆕 URL CORRECTA
-        RAILWAY_URL = "https://monitoring-routes-pjcdmx-production.up.railway.app"
-        
-        # 1. Verificar que el bot está vivo
-        health_response = requests.get(f"{RAILWAY_URL}/api/health", timeout=10)
-        if health_response.status_code != 200:
-            self.log("❌ Bot no responde - Verifica la conexión")
-            return False
-        
-        # 2. Obtener avances pendientes del bot
-        self.log("📥 DESCARGANDO AVANCES PENDIENTES...")
-        avances_response = requests.get(f"{RAILWAY_URL}/api/avances_pendientes", timeout=30)
-        
-        if avances_response.status_code == 200:
-            datos = avances_response.json()
-            avances = datos.get('avances', [])
-            total_avances = len(avances)
+    def sincronizar_con_bot(self):
+        """Sincroniza todos los Excel con los datos más recientes del bot"""
+        try:
+            self.log("🔄 CONECTANDO CON BOT...")
             
-            self.log(f"📊 AVANCES ENCONTRADOS: {total_avances}")
+            # 🆕 URL CORRECTA
+            RAILWAY_URL = "https://monitoring-routes-pjcdmx-production.up.railway.app"
             
-            if total_avances == 0:
-                self.log("✅ No hay avances pendientes por sincronizar")
-                return True
+            # 1. Verificar que el bot está vivo
+            health_response = requests.get(f"{RAILWAY_URL}/api/health", timeout=10)
+            if health_response.status_code != 200:
+                self.log("❌ Bot no responde - Verifica la conexión")
+                return False
             
-            # 3. Procesar cada avance y ACTUALIZAR EXCEL
-            actualizaciones_exitosas = 0
+            # 2. Obtener avances pendientes del bot
+            self.log("📥 DESCARGANDO AVANCES PENDIENTES...")
+            avances_response = requests.get(f"{RAILWAY_URL}/api/avances_pendientes", timeout=30)
             
-            for i, avance in enumerate(avances, 1):
-                self.log(f"📦 Procesando avance {i}/{total_avances}: {avance.get('persona_entregada', 'N/A')}")
+            if avances_response.status_code == 200:
+                datos = avances_response.json()
+                avances = datos.get('avances', [])
+                total_avances = len(avances)
                 
-                if self._procesar_avance_desde_bot(avance):
-                    actualizaciones_exitosas += 1
+                self.log(f"📊 AVANCES ENCONTRADOS: {total_avances}")
+                
+                if total_avances == 0:
+                    self.log("✅ No hay avances pendientes por sincronizar")
+                    return True
+                
+                # 3. Procesar cada avance y ACTUALIZAR EXCEL
+                actualizaciones_exitosas = 0
+                
+                for i, avance in enumerate(avances, 1):
+                    self.log(f"📦 Procesando avance {i}/{total_avances}: {avance.get('persona_entregada', 'N/A')}")
                     
-                    # 🆕 OPCIONAL: Marcar como procesado en el bot
-                    try:
-                        avance_id = avance.get('_archivo', '').replace('.json', '')
-                        requests.post(f"{RAILWAY_URL}/api/avances/{avance_id}/procesado", timeout=5)
-                    except:
-                        pass  # No crítico si falla
-            
-            self.log(f"✅ SINCRONIZACIÓN COMPLETADA: {actualizaciones_exitosas} actualizaciones en Excel")
-            
-            if actualizaciones_exitosas > 0:
-                messagebox.showinfo("Sincronización Exitosa", 
-                                  f"Se actualizaron {actualizaciones_exitosas} archivos Excel")
-            
-            return actualizaciones_exitosas > 0
-        else:
-            self.log("❌ Error obteniendo avances del bot")
+                    if self._procesar_avance_desde_bot(avance):
+                        actualizaciones_exitosas += 1
+                        
+                        # 🆕 OPCIONAL: Marcar como procesado en el bot
+                        try:
+                            avance_id = avance.get('_archivo', '').replace('.json', '')
+                            requests.post(f"{RAILWAY_URL}/api/avances/{avance_id}/procesado", timeout=5)
+                        except:
+                            pass  # No crítico si falla
+                
+                self.log(f"✅ SINCRONIZACIÓN COMPLETADA: {actualizaciones_exitosas} actualizaciones en Excel")
+                
+                if actualizaciones_exitosas > 0:
+                    messagebox.showinfo("Sincronización Exitosa", 
+                                      f"Se actualizaron {actualizaciones_exitosas} archivos Excel")
+                
+                return actualizaciones_exitosas > 0
+            else:
+                self.log("❌ Error obteniendo avances del bot")
+                return False
+                
+        except Exception as e:
+            self.log(f"❌ Error crítico en sincronización: {str(e)}")
             return False
-            
-    except Exception as e:
-        self.log(f"❌ Error crítico en sincronización: {str(e)}")
-        return False
         
     def _procesar_avance_desde_bot(self, avance):
         """Procesa un avance individual del bot y actualiza el Excel correspondiente"""
@@ -1127,7 +1125,7 @@ def sincronizar_con_bot(self):
         seleccion_window.geometry("500x300")
         
         ttk.Label(seleccion_window, text="Selecciona las columnas correspondientes:", 
-                  font=('Arial', 12, 'bold')).pack(pady=10)
+                 font=('Arial', 12, 'bold')).pack(pady=10)
         
         # Selector para dirección
         frame_dir = ttk.Frame(seleccion_window)
@@ -1546,6 +1544,7 @@ def sincronizar_con_bot(self):
             self.log("💡 Revisa el Excel correspondiente para ver la actualización")
         else:
             self.log("❌ SIMULACIÓN: Error en la entrega")
+
 # =============================================================================
 # EJECUCIÓN PRINCIPAL
 # =============================================================================
