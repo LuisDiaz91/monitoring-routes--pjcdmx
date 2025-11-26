@@ -378,32 +378,33 @@ class CoreRouteGenerator:
             self._log(f"Unexpected error in geocode for {d[:50]}...: {str(e)}")
         return None
 
-def _agrupar_ubicaciones_similares(self, filas):
-    """Agrupa personas en la misma ubicación física - VERSIÓN SUPER SIMPLE"""
-    grupos = []
-    
-    for index, fila in filas.iterrows():
-        direccion = str(fila.get('DIRECCIÓN', '')).strip()
-        if not direccion or direccion in ['nan', '']:
-            continue
-            
-        coords = self._geocode(direccion)
-        if not coords:
-            continue
-            
-        # Búsqueda simple
-        encontrado = False
-        for coord_exist, grupo_filas in grupos:
-            if self._calcular_distancia(coords, coord_exist) < 0.2:
-                grupo_filas.append(fila)
-                encontrado = True
-                self._log(f"📍 Agrupando {fila.get('NOMBRE', '')[:20]}...")
-                break
+    # 🆕 CORRECCIÓN: ESTA FUNCIÓN DEBE ESTAR DENTRO DE LA CLASE (con self)
+    def _agrupar_ubicaciones_similares(self, filas):
+        """Agrupa personas en la misma ubicación física - VERSIÓN SUPER SIMPLE"""
+        grupos = []
         
-        if not encontrado:
-            grupos.append((coords, [fila]))
-    
-    return grupos
+        for index, fila in filas.iterrows():
+            direccion = str(fila.get('DIRECCIÓN', '')).strip()
+            if not direccion or direccion in ['nan', '']:
+                continue
+                
+            coords = self._geocode(direccion)
+            if not coords:
+                continue
+                
+            # Búsqueda simple
+            encontrado = False
+            for coord_exist, grupo_filas in grupos:
+                if self._calcular_distancia(coords, coord_exist) < 0.2:
+                    grupo_filas.append(fila)
+                    encontrado = True
+                    self._log(f"📍 Agrupando {fila.get('NOMBRE', '')[:20]}...")
+                    break
+            
+            if not encontrado:
+                grupos.append((coords, [fila]))
+        
+        return grupos
        
     def _calcular_distancia(self, coord1, coord2):
         """Calcula distancia en kilómetros entre dos coordenadas"""
@@ -1167,9 +1168,9 @@ class SistemaRutasGUI:
                 origen_name=self.origen_name,
                 max_stops_per_route=self.max_stops
             )
-            
-            generator._log = self.log
-            resultados = generator.generate_routes()
+
+            # 🚀 ESTA LÍNEA FALTABA - LLAMAR AL MÉTODO generate_routes()
+resultados = generator.generate_routes()
             
             if resultados:
                 self.log(f"🎉 ¡{len(resultados)} RUTAS GENERADAS CON AGRUPAMIENTO!")
