@@ -250,34 +250,32 @@ def cargar_rutas_disponibles():
     return len(RUTAS_DISPONIBLES)
 
 def formatear_ruta_para_repartidor(ruta):
-    """Formatear ruta para mostrar al repartidor"""
-    texto = f"*🗺️ RUTA ASIGNADA - {ruta['zona']}*\n\n"
-    texto += f"*ID Ruta:* {ruta['ruta_id']}\n"
-    texto += f"*Paradas:* {len(ruta['paradas'])}\n"
-    texto += f"*Distancia:* {ruta['estadisticas']['distancia_km']} km\n"
-    texto += f"*Tiempo estimado:* {ruta['estadisticas']['tiempo_min']} min\n\n"
-    
-    entregadas = len([p for p in ruta['paradas'] if p.get('estado') == 'entregado'])
-    texto += f"*Progreso:* {entregadas}/{len(ruta['paradas'])} entregadas\n\n"
-    
-    texto += "*📍 PARADAS:*\n"
-    for parada in ruta['paradas'][:5]:
-        estado = "✅" if parada.get('estado') == 'entregado' else "⏳"
-        texto += f"{estado} *{parada['orden']}. {parada['nombre']}*\n"
-        texto += f"   🏢 {parada['dependencia']}\n"
-        texto += f"   🏠 {parada['direccion'][:35]}...\n\n"
-    
-    if len(ruta['paradas']) > 5:
-        texto += f"... y {len(ruta['paradas']) - 5} paradas más\n\n"
-    
-    texto += "*🚀 Comandos útiles:*\n"
-    texto += "📍 /ubicacion - Enviar ubicación actual\n"
-    texto += "📦 /entregar - Registrar entrega completada\n" 
-    texto += "🚨 /incidente - Reportar problema\n"
-    texto += "📸 Envía foto directo para acuse\n"
-    texto += "📊 /estatus - Actualizar estado de entrega\n"
-    
-    return texto
+    """Formatear ruta de manera SEGURA (sin Markdown problemático)"""
+    try:
+        texto = "🗺️ *RUTA ASIGNADA*\n\n"
+        texto += f"*ID:* {ruta['ruta_id']}\n"
+        texto += f"*Zona:* {ruta['zona']}\n" 
+        texto += f"*Paradas:* {len(ruta['paradas'])}\n"
+        texto += f"*Distancia:* {ruta['estadisticas']['distancia_km']} km\n"
+        texto += f"*Tiempo:* {ruta['estadisticas']['tiempo_min']} min\n\n"
+        
+        entregadas = len([p for p in ruta['paradas'] if p.get('estado') == 'entregado'])
+        texto += f"*Progreso:* {entregadas}/{len(ruta['paradas'])}\n\n"
+        
+        texto += "*Primeras 3 paradas:*\n"
+        for i, parada in enumerate(ruta['paradas'][:3], 1):
+            estado = "✅" if parada.get('estado') == 'entregado' else "📍"
+            nombre_limpio = parada['nombre'].replace('*', '').replace('_', '').replace('`', '')  # 🆕 Limpiar caracteres
+            texto += f"{estado} {parada['orden']}. {nombre_limpio}\n"
+        
+        if len(ruta['paradas']) > 3:
+            texto += f"\n... y {len(ruta['paradas']) - 3} más\n"
+        
+        return texto
+        
+    except Exception as e:
+        print(f"❌ Error formateando ruta: {e}")
+        return f"🗺️ Ruta {ruta['ruta_id']} - {ruta['zona']} ({len(ruta['paradas'])} paradas)"
 
 def registrar_avance_pendiente(datos_avance):
     """🆕 Registrar un nuevo avance pendiente de sincronización"""
