@@ -378,36 +378,44 @@ class CoreRouteGenerator:
             self._log(f"Unexpected error in geocode for {d[:50]}...: {str(e)}")
         return None
 
-    def _agrupar_ubicaciones_similares(self, filas):
-        """Agrupa personas en la misma ubicación física - MEJORADO"""
-        grupos = []
-        coordenadas_procesadas = []
-        
-        for _, fila in filas.iterrows():
-            direccion = str(fila.get('DIRECCIÓN', '')).strip()
-            if not direccion or direccion in ['nan', '']:
-                continue
-                
-            coords = self._geocode(direccion)
-            if not coords:
-                continue
-                
-            # Verificar si esta coordenada está cerca de alguna ya procesada
-            agrupado = False
-            for i, (coord_existente, grupo_existente) in enumerate(grupos):
-                distancia = self._calcular_distancia(coords, coord_existente)
-                # Si están a menos de 200 metros, considerar misma ubicación
-                if distancia < 0.2:  # 200 metros
-                    grupo_existente.append(fila)
-                    agrupado = True
-                    self._log(f"📍 Agrupando {fila.get('NOMBRE', '')[:20]}... con grupo existente")
-                    break
+   def _agrupar_ubicaciones_similares(self, filas):
+    """Agrupa personas en la misma ubicación física - VERSIÓN CORREGIDA"""
+    grupos = []
+    
+    # 🆕 CORRECCIÓN: Crear una lista de (índice, fila, coordenadas) primero
+    datos_con_coords = []
+    
+    for index, fila in filas.iterrows():
+        direccion = str(fila.get('DIRECCIÓN', '')).strip()
+        if not direccion or direccion in ['nan', '']:
+            continue
             
-            if not agrupado:
-                grupos.append((coords, [fila]))
-                coordenadas_procesadas.append(coords)
+        coords = self._geocode(direccion)
+        if coords:
+            datos_con_coords.append((index, fila, coords))
+    
+    # Ahora agrupar por coordenadas similares
+    for index, fila, coords in datos_con_coords:
+        agrupado = False
         
-        return grupos
+        for i, (coord_existente, indices_existentes, filas_existentes) in enumerate(grupos):
+            distancia = self._calcular_distancia(coords, coord_existente)
+            if distancia < 0.2:  # 200 metros
+                indices_existentes.append(index)
+                filas_existentes.append(fila)
+                agrupado = True
+                self._log(f"📍 Agrupando {fila.get('NOMBRE', '')[:20]}... con grupo existente")
+                break
+        
+        if not agrupado:
+            grupos.append((coords, [index], [fila]))
+    
+    # 🆕 Devolver en formato compatible con el resto del código
+    grupos_compatibles = []
+    for coords, indices, filas_grupo in grupos:
+        grupos_compatibles.append((coords, filas_grupo))
+    
+    return grupos_compatibles
 
     def _calcular_distancia(self, coord1, coord2):
         """Calcula distancia en kilómetros entre dos coordenadas"""
@@ -705,61 +713,192 @@ class CoreRouteGenerator:
             'telegram_file': telegram_file
         }
 
-    def generate_routes(self):
-        self._log("Starting Core Route Generation Process")
-        self._log(f"Initial data records: {len(self.df)}")
-        if self.df.empty:
-            self._log("No data to process.")
-            return []
+   def generate_routes(self):
+    self._log("Starting Core Route Generation Process")
+    self._log(f"Initial data records: {len(self.df)}")
+    if self.df.empty:
+        self._log("No data to process.")
+        return []
+    
+    df_clean = self.df.copy()
+    if 'DIRECCIÓN' in df_clean.columns:
+        df_clean['DIRECCIÓN'] = df_clean['DIRECCIÓN'].astype(str).str.replace('\n', ' ', regex=False).str.strip()
+        df_clean['DIRECCIÓN'] = df_clean['DIRECCIÓN'].str.split('/').str[0]
         
-        df_clean = self.df.copy()
-        if 'DIRECCIÓN' in df_clean.columns:
-            df_clean['DIRECCIÓN'] = df_clean['DIRECCIÓN'].astype(str).str.replace('\n', ' ', regex=False).str.strip()
-            df_clean['DIRECCIÓN'] = df_clean['DIRECCIÓN'].str.split('/').str[0]
-            
-            # 🎯 FILTRO INTELIGENTE
-            mask = (
-                df_clean['DIRECCIÓN'].str.contains(r'CDMX|CIUDAD DE MÉXICO|CIUDAD DE MEXICO', case=False, na=False) |
-                df_clean['DIRECCIÓN'].str.contains(r'CD\.MX|MÉXICO D\.F\.|MEXICO D\.F\.', case=False, na=False) |
-                (df_clean['ALCALDÍA'].notna() if 'ALCALDÍA' in df_clean.columns else False)
-            )
-            df_clean = df_clean[mask]
-            self._log(f"📍 Registros después de filtro inteligente: {len(df_clean)}")
-        else:
-            self._log("'DIRECCIÓN' column not found.")
-            return []
-        
-        def extraer_alcaldia(d):
-            d = str(d).upper()
-            alcaldias = {
-                'CUAUHTEMOC': ['CUAUHTEMOC', 'CUÁUHTEMOC', 'DOCTORES', 'CENTRO', 'JUÁREZ', 'ROMA', 'CONDESA'],
-                'MIGUEL HIDALGO': ['MIGUEL HIDALGO', 'POLANCO', 'LOMAS', 'CHAPULTEPEC'],
-                'BENITO JUAREZ': ['BENITO JUÁREZ', 'DEL VALLE', 'NÁPOLES'],
-                'ALVARO OBREGON': ['ÁLVARO OBREGÓN', 'SAN ÁNGEL', 'LAS ÁGUILAS'],
-                'COYOACAN': ['COYOACÁN', 'COYOACAN'],
-                'TLALPAN': ['TLALPAN'],
-                'IZTAPALAPA': ['IZTAPALAPA'],
-                'GUSTAVO A. MADERO': ['GUSTAVO A. MADERO'],
-                'AZCAPOTZALCO': ['AZCAPOTZALCO'],
-                'VENUSTIANO CARRANZA': ['VENUSTIANO CARRANZA'],
-                'XOCHIMILCO': ['XOCHIMILCO'],
-                'IZTACALCO': ['IZTACALCO'],
-                'MILPA ALTA': ['MILPA ALTA'],
-                'TLÁHUAC': ['TLÁHUAC']
-            }
-            for alc, palabras in alcaldias.items():
-                if any(p in d for p in palabras):
-                    return alc.title()
-            return "NO IDENTIFICADA"
-        
-        df_clean['Alcaldia'] = df_clean['DIRECCIÓN'].apply(extraer_alcaldia)
-        
-        ZONAS = {
-            'CENTRO': ['Cuauhtemoc', 'Venustiano Carranza', 'Miguel Hidalgo'],
-            'SUR': ['Coyoacán', 'Tlalpan', 'Álvaro Obregón', 'Benito Juárez'],
-            'ORIENTE': ['Iztacalco', 'Iztapalapa', 'Gustavo A. Madero'],
-            'SUR_ORIENTE': ['Xochimilco', 'Milpa Alta', 'Tláhuac'],
+        # 🎯 FILTRO INTELIGENTE
+        mask = (
+            df_clean['DIRECCIÓN'].str.contains(r'CDMX|CIUDAD DE MÉXICO|CIUDAD DE MEXICO', case=False, na=False) |
+            df_clean['DIRECCIÓN'].str.contains(r'CD\.MX|MÉXICO D\.F\.|MEXICO D\.F\.', case=False, na=False) |
+            (df_clean['ALCALDÍA'].notna() if 'ALCALDÍA' in df_clean.columns else False)
+        )
+        df_clean = df_clean[mask]
+        self._log(f"📍 Registros después de filtro inteligente: {len(df_clean)}")
+    else:
+        self._log("'DIRECCIÓN' column not found.")
+        return []
+    
+    def extraer_alcaldia(d):
+        d = str(d).upper()
+        alcaldias = {
+            'CUAUHTEMOC': ['CUAUHTEMOC', 'CUÁUHTEMOC', 'DOCTORES', 'CENTRO', 'JUÁREZ', 'ROMA', 'CONDESA'],
+            'MIGUEL HIDALGO': ['MIGUEL HIDALGO', 'POLANCO', 'LOMAS', 'CHAPULTEPEC'],
+            'BENITO JUAREZ': ['BENITO JUÁREZ', 'DEL VALLE', 'NÁPOLES'],
+            'ALVARO OBREGON': ['ÁLVARO OBREGÓN', 'SAN ÁNGEL', 'LAS ÁGUILAS'],
+            'COYOACAN': ['COYOACÁN', 'COYOACAN'],
+            'TLALPAN': ['TLALPAN'],
+            'IZTAPALAPA': ['IZTAPALAPA'],
+            'GUSTAVO A. MADERO': ['GUSTAVO A. MADERO'],
+            'AZCAPOTZALCO': ['AZCAPOTZALCO'],
+            'VENUSTIANO CARRANZA': ['VENUSTIANO CARRANZA'],
+            'XOCHIMILCO': ['XOCHIMILCO'],
+            'IZTACALCO': ['IZTACALCO'],
+            'MILPA ALTA': ['MILPA ALTA'],
+            'TLÁHUAC': ['TLÁHUAC']
         }
+        for alc, palabras in alcaldias.items():
+            if any(p in d for p in palabras):
+                return alc.title()
+        return "NO IDENTIFICADA"
+    
+    df_clean['Alcaldia'] = df_clean['DIRECCIÓN'].apply(extraer_alcaldia)
+    
+    ZONAS = {
+        'CENTRO': ['Cuauhtemoc', 'Venustiano Carranza', 'Miguel Hidalgo'],
+        'SUR': ['Coyoacán', 'Tlalpan', 'Álvaro Obregón', 'Benito Juárez'],
+        'ORIENTE': ['Iztacalco', 'Iztapalapa', 'Gustavo A. Madero'],
+        'SUR_ORIENTE': ['Xochimilco', 'Milpa Alta', 'Tláhuac'],
+    }
+    
+    def asignar_zona(alc):
+        for zona_name, alcaldias_in_zone in ZONAS.items():
+            if alc in alcaldias_in_zone:
+                return zona_name
+        return 'OTRAS'
+    
+    df_clean['Zona'] = df_clean['Alcaldia'].apply(asignar_zona)
+    
+    # 🆕 CORRECCIÓN CRÍTICA: Distribuir mejor las ubicaciones entre rutas
+    subgrupos = {}
+    for zona in df_clean['Zona'].unique():
+        # Obtener todas las filas de esta zona
+        filas_zona = df_clean[df_clean['Zona'] == zona]
+        
+        # Primero agrupar por ubicación
+        grupos_ubicaciones = self._agrupar_ubicaciones_similares(filas_zona)
+        
+        # 🆕 CORRECCIÓN: Distribución más simple y robusta
+        rutas_zona = []
+        ruta_actual_indices = []
+        total_personas_en_ruta = 0
+        
+        for coords, grupo_filas in grupos_ubicaciones:
+            cantidad_personas = len(grupo_filas)
+            
+            # Obtener los índices originales de estas filas
+            indices_grupo = []
+            for fila in grupo_filas:
+                # Buscar el índice en el DataFrame original usando múltiples criterios
+                mask = (
+                    (self.df['NOMBRE'].astype(str) == str(fila.get('NOMBRE', ''))) & 
+                    (self.df['DIRECCIÓN'].astype(str) == str(fila.get('DIRECCIÓN', '')))
+                )
+                match = self.df[mask]
+                if not match.empty:
+                    indices_grupo.append(match.index[0])
+                else:
+                    # Fallback: buscar por nombre solamente
+                    mask_nombre = (self.df['NOMBRE'].astype(str) == str(fila.get('NOMBRE', '')))
+                    match_nombre = self.df[mask_nombre]
+                    if not match_nombre.empty:
+                        indices_grupo.append(match_nombre.index[0])
+                    else:
+                        # Último fallback: usar el primer índice disponible
+                        self._log(f"⚠️ No se pudo encontrar índice exacto para: {fila.get('NOMBRE', '')[:20]}")
+                        if len(self.df) > 0:
+                            indices_grupo.append(self.df.index[0])
+            
+            # Si al agregar este grupo nos pasamos del límite, empezar nueva ruta
+            if total_personas_en_ruta + cantidad_personas > self.max_stops_per_route and ruta_actual_indices:
+                rutas_zona.append(ruta_actual_indices)
+                self._log(f"  🚀 Nueva ruta: {len(ruta_actual_indices)} personas")
+                ruta_actual_indices = []
+                total_personas_en_ruta = 0
+            
+            # Agregar grupo a la ruta actual
+            ruta_actual_indices.extend(indices_grupo)
+            total_personas_en_ruta += cantidad_personas
+            self._log(f"  📦 Grupo agregado: {cantidad_personas} personas (total en ruta: {total_personas_en_ruta})")
+        
+        # Agregar la última ruta si tiene contenido
+        if ruta_actual_indices:
+            rutas_zona.append(ruta_actual_indices)
+            self._log(f"  🚀 Última ruta: {len(ruta_actual_indices)} personas")
+        
+        subgrupos[zona] = rutas_zona
+        self._log(f"📍 {zona}: {len(grupos_ubicaciones)} ubicaciones → {len(rutas_zona)} rutas")
+    
+    self._log("Generating Optimized Routes...")
+    self.results = []
+    ruta_id = 1
+    total_routes_to_process = sum(len(grupos) for grupos in subgrupos.values())
+    
+    for zona in subgrupos.keys():
+        for i, grupo_indices in enumerate(subgrupos[zona]):
+            self._log(f"🔄 Processing Route {ruta_id} of {total_routes_to_process}: {zona}")
+            try:
+                result = self._crear_ruta_archivos(zona, grupo_indices, ruta_id)
+                if result:
+                    self.results.append(result)
+                    self._log(f"✅ Ruta {ruta_id} creada: {result['paradas']} paradas, {result['personas']} personas")
+                else:
+                    self._log(f"⚠️ Ruta {ruta_id} no pudo ser creada")
+            except Exception as e:
+                self._log(f"❌ Error in route {ruta_id}: {str(e)}")
+                import traceback
+                self._log(f"❌ Traceback: {traceback.format_exc()}")
+            ruta_id += 1
+    
+    try:
+        with open(self.CACHE_FILE, 'w') as f:
+            json.dump(self.GEOCODE_CACHE, f)
+        self._log("✅ Geocode cache saved.")
+    except Exception as e:
+        self._log(f"❌ Error saving cache: {str(e)}")
+    
+    if self.results:
+        resumen_df = pd.DataFrame([{
+            'Ruta': r['ruta_id'],
+            'Zona': r['zona'],
+            'Paradas': r['paradas'],
+            'Personas': r['personas'],
+            'Distancia_km': r['distancia'],
+            'Tiempo_min': r['tiempo'],
+            'Excel': os.path.basename(r['excel']),
+            'Mapa': os.path.basename(r['mapa'])
+        } for r in self.results])
+        try:
+            resumen_df.to_excel("RESUMEN_RUTAS.xlsx", index=False)
+            self._log("✅ Summary 'RESUMEN_RUTAS.xlsx' generated.")
+        except Exception as e:
+            self._log(f"❌ Error generating summary: {str(e)}")
+    
+    total_routes_gen = len(self.results)
+    total_paradas = sum(r['paradas'] for r in self.results) if self.results else 0
+    total_personas = sum(r['personas'] for r in self.results) if self.results else 0
+    total_distancia = sum(r['distancia'] for r in self.results) if self.results else 0
+    total_tiempo = sum(r['tiempo'] for r in self.results) if self.results else 0
+    
+    self._log("🎉 CORE ROUTE GENERATION COMPLETED")
+    self._log(f"📊 FINAL SUMMARY: {total_routes_gen} routes, {total_paradas} paradas, {total_personas} personas")
+    
+    # 🆕 LOG ADICIONAL: Mostrar distribución por zona
+    self._log("📈 DISTRIBUCIÓN POR ZONA:")
+    for zona in subgrupos.keys():
+        rutas_zona = subgrupos[zona]
+        total_personas_zona = sum(len(ruta) for ruta in rutas_zona)
+        self._log(f"   {zona}: {len(rutas_zona)} rutas, {total_personas_zona} personas")
+    
+    return self.results
         
         def asignar_zona(alc):
             for zona_name, alcaldias_in_zone in ZONAS.items():
