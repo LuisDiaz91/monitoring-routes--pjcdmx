@@ -466,7 +466,7 @@ def enviar_bienvenida(message):
 @manejar_errores_telegram
 @bot.message_handler(commands=['solicitar_ruta'])
 def solicitar_ruta_automatica(message):
-    """Asignar ruta automáticamente al repartidor"""
+    """Asignar ruta automáticamente al repartidor - CON MANEJO DE ERRORES"""
     try:
         user_id = message.from_user.id
         user_name = message.from_user.first_name
@@ -476,8 +476,7 @@ def solicitar_ruta_automatica(message):
         if user_id in RUTAS_ASIGNADAS:
             bot.reply_to(message, 
                         "📭 *Ya tienes una ruta asignada.*\n\n"
-                        "Usa /miruta para ver tu ruta actual.\n"
-                        "Si has completado tu ruta, contacta a soporte.",
+                        "Usa /miruta para ver tu ruta actual.",
                         parse_mode='Markdown')
             return
         
@@ -485,9 +484,7 @@ def solicitar_ruta_automatica(message):
         
         if rutas_disponibles == 0:
             bot.reply_to(message, 
-                        "📭 *No hay rutas disponibles en este momento.*\n\n"
-                        "Todas las rutas han sido asignadas.\n"
-                        "Contacta a tu supervisor o intenta más tarde.",
+                        "📭 *No hay rutas disponibles en este momento.*",
                         parse_mode='Markdown')
             return
         
@@ -504,34 +501,40 @@ def solicitar_ruta_automatica(message):
             json.dump(ruta_asignada, f, indent=2, ensure_ascii=False)
         
         RUTAS_ASIGNADAS[user_id] = ruta_id
-        mensaje = formatear_ruta_para_repartidor(ruta_asignada)
+        mensaje = formatear_ruta_para_repartidor(ruta_asignada)  # 🆕 Usa tu función segura
         
         markup = types.InlineKeyboardMarkup()
         btn_maps = types.InlineKeyboardButton("🗺️ Abrir en Google Maps", url=ruta_asignada['google_maps_url'])
         markup.add(btn_maps)
         
-        bot.reply_to(message, mensaje, parse_mode='Markdown', reply_markup=markup)
-        print(f"✅ Ruta {ruta_id} asignada a {user_name}")
+        # 🆕 MANEJO SEGURO DEL ENVÍO
+        try:
+            bot.reply_to(message, mensaje, parse_mode='Markdown', reply_markup=markup)
+            print(f"✅ Ruta {ruta_id} asignada a {user_name}")
+        except Exception as e:
+            print(f"❌ Error enviando mensaje formateado: {e}")
+            # Fallback: enviar sin formato Markdown
+            mensaje_simple = f"🗺️ Ruta {ruta_id} - {zona}\n{len(ruta_asignada['paradas'])} paradas\n\nAbre en Maps:"
+            bot.reply_to(message, mensaje_simple, parse_mode=None, reply_markup=markup)
         
     except Exception as e:
         error_msg = f"❌ Error asignando ruta: {str(e)}"
         print(error_msg)
         bot.reply_to(message, 
                     "❌ *Error al asignar ruta.*\n\n"
-                    "Por favor, intenta nuevamente o contacta a soporte.",
+                    "Por favor, intenta nuevamente.",
                     parse_mode='Markdown')
 
 @manejar_errores_telegram
 @bot.message_handler(commands=['miruta'])
 def ver_mi_ruta(message):
-    """Ver la ruta asignada actual"""
+    """Ver la ruta asignada actual - CON MANEJO SEGURO"""
     user_id = message.from_user.id
     user_name = message.from_user.first_name
     
     if user_id not in RUTAS_ASIGNADAS:
         bot.reply_to(message, 
-                    "📭 *No tienes una ruta asignada.*\n\n"
-                    "Usa /solicitar_ruta para obtener una ruta automáticamente.",
+                    "📭 *No tienes una ruta asignada.*",
                     parse_mode='Markdown')
         return
     
@@ -543,22 +546,27 @@ def ver_mi_ruta(message):
                 with open(f'rutas_telegram/{archivo}', 'r', encoding='utf-8') as f:
                     ruta = json.load(f)
                 
-                mensaje = formatear_ruta_para_repartidor(ruta)
+                mensaje = formatear_ruta_para_repartidor(ruta)  # 🆕 Usa tu función segura
                 markup = types.InlineKeyboardMarkup()
                 btn_maps = types.InlineKeyboardButton("🗺️ Abrir en Google Maps", url=ruta['google_maps_url'])
                 markup.add(btn_maps)
                 
-                bot.reply_to(message, mensaje, parse_mode='Markdown', reply_markup=markup)
+                # 🆕 MANEJO SEGURO DEL ENVÍO
+                try:
+                    bot.reply_to(message, mensaje, parse_mode='Markdown', reply_markup=markup)
+                except Exception as e:
+                    print(f"❌ Error enviando /miruta: {e}")
+                    mensaje_simple = f"🗺️ Ruta {ruta_id}\n{ruta['zona']} - {len(ruta['paradas'])} paradas\n\nAbre en Maps:"
+                    bot.reply_to(message, mensaje_simple, parse_mode=None, reply_markup=markup)
                 return
                 
             except Exception as e:
                 print(f"❌ Error leyendo ruta {archivo}: {e}")
     
     bot.reply_to(message, 
-                "❌ *No se pudo encontrar tu ruta asignada.*\n\n"
-                "Por favor, usa /solicitar_ruta para obtener una nueva ruta.",
+                "❌ *No se pudo encontrar tu ruta.*",
                 parse_mode='Markdown')
-
+    
 @manejar_errores_telegram  
 @bot.message_handler(content_types=['photo'])
 def manejar_foto(message):
