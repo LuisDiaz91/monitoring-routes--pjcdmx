@@ -1,4 +1,4 @@
-# sistema_rutas_optimizado.py
+# sistema_rutas_funcional.py
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, scrolledtext
 import pandas as pd
@@ -27,33 +27,46 @@ from packaging import version
 import re
 
 # =============================================================================
-# CLASE CONEXIÓN CON BOT RAILWAY (SIMPLIFICADA)
+# CLASE CONEXIÓN CON BOT RAILWAY
 # =============================================================================
 class ConexionBotRailway:
     def __init__(self, url_base):
         self.url_base = url_base
         self.timeout = 30
     
-    def enviar_ruta_bot(self, ruta_data):
+    def verificar_conexion(self):
+        """Verificar que el bot está disponible"""
         try:
-            # ENVIAR SOLO DATOS ESENCIALES para ahorrar memoria
-            datos_light = {
-                'ruta_id': ruta_data.get('ruta_id'),
-                'zona': ruta_data.get('zona'),
-                'paradas_count': len(ruta_data.get('paradas', [])),
-                'timestamp': ruta_data.get('timestamp_creacion')
-            }
-            
-            url = f"{self.url_base}/api/rutas"
-            response = requests.post(url, json=datos_light, timeout=self.timeout)
+            response = requests.get(f"{self.url_base}/api/health", timeout=10)
             return response.status_code == 200
+        except:
+            return False
+
+    def enviar_ruta_bot(self, ruta_data):
+        """Enviar ruta generada al bot en Railway"""
+        try:
+            url = f"{self.url_base}/api/rutas"
+            
+            response = requests.post(
+                url,
+                json=ruta_data,
+                timeout=self.timeout,
+                headers={'Content-Type': 'application/json'}
+            )
+            
+            if response.status_code == 200:
+                print(f"✅ Ruta {ruta_data['ruta_id']} enviada al bot")
+                return True
+            else:
+                print(f"❌ Error enviando ruta: {response.status_code}")
+                return False
                 
         except Exception as e:
-            print(f"❌ Error de conexión: {e}")
+            print(f"❌ Error de conexión con bot: {e}")
             return False
 
 # =============================================================================
-# CLASE MOTOR DE RUTAS OPTIMIZADO
+# CLASE MOTOR DE RUTAS FUNCIONAL
 # =============================================================================
 class CoreRouteGenerator:
     def __init__(self, df, api_key, origen_coords, origen_name, max_stops_per_route):
@@ -77,35 +90,32 @@ class CoreRouteGenerator:
         return {}
 
     def _log(self, message):
-        """Log optimizado para memoria"""
-        timestamp = datetime.now().strftime("%H:%M:%S")
-        print(f"[{timestamp}] {message}")
+        """Log para la interfaz"""
+        print(f"{message}")
 
     def _normalizar_direccion(self, direccion):
-        """Normalización SUPER ligera"""
-        if pd.isna(direccion):
+        """Normalización simple"""
+        if pd.isna(direccion) or direccion == '':
             return ""
         
         direccion_str = str(direccion).upper().strip()
         
-        # Solo eliminar espacios extras
+        # Limpiar dirección básicamente
         direccion_str = re.sub(r'\s+', ' ', direccion_str)
         
-        # Eliminar palabras muy comunes
-        palabras_comunes = ['CDMX', 'CIUDAD', 'MÉXICO', 'MEXICO', 'COLONIA', 'COL']
-        palabras = direccion_str.split()
-        palabras_filtradas = [p for p in palabras if p not in palabras_comunes]
-        
-        return ' '.join(palabras_filtradas[:10])  # Limitar longitud
+        return direccion_str
 
-    def _agrupar_direcciones_rapido(self, df):
-        """Agrupación RÁPIDA y eficiente en memoria"""
-        self._log("🔍 Agrupando direcciones (modo rápido)...")
+    def _agrupar_direcciones(self, df):
+        """Agrupación FUNCIONAL"""
+        self._log("🔍 Agrupando direcciones...")
         
-        # Crear columna normalizada (mínimo procesamiento)
+        # Crear columna normalizada
         df['DIR_NORM'] = df['DIRECCIÓN'].apply(self._normalizar_direccion)
         
-        # Agrupar eficientemente
+        # Filtrar direcciones vacías
+        df = df[df['DIR_NORM'] != '']
+        
+        # Agrupar
         grupos = df.groupby('DIR_NORM')
         
         datos_agrupados = []
@@ -113,28 +123,35 @@ class CoreRouteGenerator:
             cantidad = len(grupo)
             
             if cantidad > 1:
-                # Agrupación rápida - tomar primera fila
+                # AGUPAR MÚLTIPLES PERSONAS
                 fila_base = grupo.iloc[0].copy()
-                fila_base['NOMBRE'] = f"ENTREGA MÚLTIPLE ({cantidad})"
+                
+                # Combinar nombres
+                nombres = [str(n).split(',')[0].strip() for n in grupo['NOMBRE'] if pd.notna(n)]
+                if len(nombres) > 3:
+                    nombre_combinado = f"ENTREGA MÚLTIPLE ({cantidad} personas)"
+                else:
+                    nombre_combinado = f"ENTREGA MÚLTIPLE: {', '.join(nombres)}"
+                
+                fila_base['NOMBRE'] = nombre_combinado
                 fila_base['PERSONAS_AGRUPADAS'] = cantidad
+                fila_base['NOMBRES_ORIGINALES'] = " | ".join(nombres)
+                
                 datos_agrupados.append(fila_base)
             else:
-                # Una sola persona
+                # UNA SOLA PERSONA
                 fila_unica = grupo.iloc[0].copy()
                 fila_unica['PERSONAS_AGRUPADAS'] = 1
+                fila_unica['NOMBRES_ORIGINALES'] = str(fila_unica['NOMBRE'])
                 datos_agrupados.append(fila_unica)
         
         df_agrupado = pd.DataFrame(datos_agrupados)
-        self._log(f"✅ Agrupación: {len(df)} → {len(df_agrupado)} puntos")
-        
-        # LIMPIAR MEMORIA
-        del df
-        del grupos
+        self._log(f"✅ De {len(df)} → {len(df_agrupado)} puntos de entrega")
         
         return df_agrupado
 
-    def _geocode_rapido(self, direccion):
-        """Geocoding optimizado"""
+    def _geocode(self, direccion):
+        """Geocoding con manejo de errores"""
         d = str(direccion).strip()
         if not d or d in ['nan', '']:
             return None
@@ -153,93 +170,132 @@ class CoreRouteGenerator:
                 loc = data['results'][0]['geometry']['location']
                 coords = (loc['lat'], loc['lng'])
                 self.GEOCODE_CACHE[key] = coords
-                time.sleep(0.1)  # Reducir delay
+                time.sleep(0.1)
                 return coords
                 
         except Exception as e:
-            self._log(f"Geocode error: {e}")
+            self._log(f"⚠️ Geocode error para: {d[:30]}...")
             
         return None
 
-    def generate_routes_fast(self):
-        """Generación de rutas OPTIMIZADA"""
-        self._log("🚀 INICIANDO GENERACIÓN RÁPIDA...")
+    def generate_routes(self):
+        """Generación de rutas COMPLETA"""
+        self._log("🚀 INICIANDO GENERACIÓN...")
         
         try:
-            # 1. FILTRADO BÁSICO
+            # 1. PREPARAR DATOS
             df_clean = self.df.copy()
-            if 'DIRECCIÓN' in df_clean.columns:
-                mask = df_clean['DIRECCIÓN'].str.contains(r'CDMX|CIUDAD', case=False, na=False)
-                df_clean = df_clean[mask]
-                self._log(f"📍 Registros válidos: {len(df_clean)}")
             
-            # 2. AGRUPACIÓN RÁPIDA
-            df_agrupado = self._agrupar_direcciones_rapido(df_clean)
+            # Verificar columnas necesarias
+            if 'DIRECCIÓN' not in df_clean.columns:
+                self._log("❌ Error: No hay columna 'DIRECCIÓN'")
+                return []
             
-            # 3. ASIGNAR ZONAS SIMPLIFICADO
-            def zona_rapida(direccion):
+            # Limpiar datos
+            df_clean['DIRECCIÓN'] = df_clean['DIRECCIÓN'].astype(str).fillna('')
+            df_clean = df_clean[df_clean['DIRECCIÓN'].str.strip() != '']
+            
+            if 'NOMBRE' not in df_clean.columns:
+                df_clean['NOMBRE'] = 'Sin nombre'
+            else:
+                df_clean['NOMBRE'] = df_clean['NOMBRE'].astype(str).fillna('Sin nombre')
+            
+            self._log(f"📊 Datos limpios: {len(df_clean)} registros")
+            
+            # 2. AGRUPAR DIRECCIONES
+            df_agrupado = self._agrupar_direcciones(df_clean)
+            
+            if len(df_agrupado) == 0:
+                self._log("❌ No hay datos válidos después de agrupar")
+                return []
+            
+            # 3. ASIGNAR ZONAS
+            def asignar_zona_simple(direccion):
                 d = str(direccion).upper()
-                if any(p in d for p in ['CUAUHTEMOC', 'CENTRO', 'DOCTORES']):
+                if any(p in d for p in ['CUAUHTEMOC', 'CENTRO', 'DOCTORES', 'ROMA', 'CONDESA']):
                     return 'CENTRO'
-                elif any(p in d for p in ['COYOACAN', 'TLALPAN', 'BENITO']):
+                elif any(p in d for p in ['COYOACAN', 'TLALPAN', 'BENITO', 'DEL VALLE', 'NÁPOLES']):
                     return 'SUR'
-                elif any(p in d for p in ['IZTAPALAPA', 'GUSTAVO']):
+                elif any(p in d for p in ['IZTAPALAPA', 'GUSTAVO', 'IZTACALCO']):
                     return 'ORIENTE'
+                elif any(p in d for p in ['XOCHIMILCO', 'MILPA', 'TLÁHUAC']):
+                    return 'SUR_ORIENTE'
                 else:
                     return 'OTRAS'
             
-            df_agrupado['Zona'] = df_agrupado['DIRECCIÓN'].apply(zona_rapida)
+            df_agrupado['Zona'] = df_agrupado['DIRECCIÓN'].apply(asignar_zona_simple)
             
             # 4. CREAR RUTAS POR ZONA
+            self._log("🗺️ Creando rutas por zona...")
+            
             for zona in df_agrupado['Zona'].unique():
                 zonas_df = df_agrupado[df_agrupado['Zona'] == zona]
-                self._log(f"🗺️ Procesando {zona}: {len(zonas_df)} puntos")
+                self._log(f"   📍 {zona}: {len(zonas_df)} puntos")
                 
-                # Crear rutas básicas
+                # Dividir en rutas
                 puntos = zonas_df.index.tolist()
                 rutas_zona = [puntos[i:i+self.max_stops_per_route] for i in range(0, len(puntos), self.max_stops_per_route)]
                 
-                for i, ruta_indices in enumerate(rutas_zona, 1):
-                    self._crear_ruta_simple(zona, ruta_indices, i)
+                for i, ruta_indices in enumerate(rutas_zona, len(self.results) + 1):
+                    self._crear_ruta_completa(zona, ruta_indices, i)
             
-            # 5. GUARDAR RESULTADOS
+            # 5. GUARDAR Y TERMINAR
             self._guardar_cache()
-            self._log("🎉 GENERACIÓN COMPLETADA")
+            
+            if self.results:
+                total_rutas = len(self.results)
+                total_puntos = sum(r['puntos_entrega'] for r in self.results)
+                total_personas = sum(r['personas_totales'] for r in self.results)
+                
+                self._log(f"🎉 GENERACIÓN COMPLETADA: {total_rutas} rutas")
+                self._log(f"📍 {total_puntos} puntos de entrega")
+                self._log(f"👥 {total_personas} personas totales")
+            else:
+                self._log("❌ No se generaron rutas")
             
             return self.results
             
         except Exception as e:
-            self._log(f"❌ ERROR: {str(e)}")
+            self._log(f"❌ ERROR CRÍTICO: {str(e)}")
             return []
 
-    def _crear_ruta_simple(self, zona, indices, ruta_id):
-        """Crear ruta simple sin mapas pesados"""
+    def _crear_ruta_completa(self, zona, indices, ruta_id):
+        """Crear ruta completa con Excel y envío al bot"""
         try:
             filas = self.df.loc[indices]
             
-            # Geocoding básico
+            # Geocoding
             coords_validas = []
             filas_validas = []
             
             for _, fila in filas.iterrows():
-                coord = self._geocode_rapido(fila['DIRECCIÓN'])
+                coord = self._geocode(fila['DIRECCIÓN'])
                 if coord:
                     coords_validas.append(coord)
                     filas_validas.append(fila)
             
-            if len(coords_validas) < 2:
+            if len(coords_validas) < 1:
+                self._log(f"⚠️ Ruta {ruta_id}: Sin coordenadas válidas")
                 return
             
-            # CREAR EXCEL SIMPLE
+            # CREAR EXCEL
             excel_data = []
             for i, (fila, coord) in enumerate(zip(filas_validas, coords_validas), 1):
                 personas = fila.get('PERSONAS_AGRUPADAS', 1)
+                
                 excel_data.append({
                     'Orden': i,
                     'Nombre': str(fila.get('NOMBRE', 'N/A')),
+                    'Dependencia': str(fila.get('ADSCRIPCIÓN', 'N/A')),
                     'Dirección': str(fila.get('DIRECCIÓN', 'N/A')),
                     'Personas_Agrupadas': personas,
-                    'Estado': 'PENDIENTE'
+                    'Nombres_Originales': fila.get('NOMBRES_ORIGINALES', ''),
+                    'Acuse': '',
+                    'Repartidor': '',
+                    'Foto_Acuse': '',
+                    'Timestamp_Entrega': '',
+                    'Estado': 'PENDIENTE',
+                    'Coordenadas': f"{coord[0]},{coord[1]}"
                 })
             
             # Guardar Excel
@@ -247,31 +303,42 @@ class CoreRouteGenerator:
             excel_file = f"rutas_excel/Ruta_{ruta_id}_{zona}.xlsx"
             pd.DataFrame(excel_data).to_excel(excel_file, index=False)
             
-            # DATOS PARA TELEGRAM (ligeros)
+            # DATOS PARA TELEGRAM
             ruta_telegram = {
                 'ruta_id': ruta_id,
                 'zona': zona,
-                'paradas_count': len(filas_validas),
-                'timestamp': datetime.now().isoformat()
+                'paradas': [
+                    {
+                        'orden': i,
+                        'nombre': str(fila.get('NOMBRE', 'N/A')),
+                        'direccion': str(fila.get('DIRECCIÓN', 'N/A')),
+                        'personas_agrupadas': fila.get('PERSONAS_AGRUPADAS', 1),
+                        'coords': f"{coord[0]},{coord[1]}"
+                    }
+                    for i, (fila, coord) in enumerate(zip(filas_validas, coords_validas), 1)
+                ],
+                'timestamp_creacion': datetime.now().isoformat()
             }
             
             # Enviar al bot
             conexion = ConexionBotRailway("https://monitoring-routes-pjcdmx-production.up.railway.app")
-            if conexion.verificar_conexion():
-                conexion.enviar_ruta_bot(ruta_telegram)
-                self._log(f"✅ Ruta {ruta_id} enviada")
+            if conexion.enviar_ruta_bot(ruta_telegram):
+                self._log(f"✅ Ruta {ruta_id} enviada al bot")
+            else:
+                self._log(f"⚠️ Ruta {ruta_id} no se pudo enviar")
             
             self.results.append({
                 'ruta_id': ruta_id,
                 'zona': zona,
-                'puntos': len(filas_validas)
+                'puntos_entrega': len(filas_validas),
+                'personas_totales': sum(f.get('PERSONAS_AGRUPADAS', 1) for f in filas_validas)
             })
             
         except Exception as e:
-            self._log(f"Error en ruta {ruta_id}: {str(e)}")
+            self._log(f"❌ Error en ruta {ruta_id}: {str(e)}")
 
     def _guardar_cache(self):
-        """Guardar cache de forma segura"""
+        """Guardar cache"""
         try:
             with open(self.CACHE_FILE, 'w') as f:
                 json.dump(self.GEOCODE_CACHE, f)
@@ -279,83 +346,105 @@ class CoreRouteGenerator:
             pass
 
 # =============================================================================
-# INTERFAZ GRÁFICA SIMPLIFICADA
+# INTERFAZ GRÁFICA FUNCIONAL
 # =============================================================================
-class SistemaRutasSimpleGUI:
+class SistemaRutasGUI:
     def __init__(self, root):
         self.root = root
-        self.root.title("Sistema Rutas RÁPIDO")
-        self.root.geometry("800x600")
+        self.root.title("Sistema Rutas CON AGRUPACIÓN")
+        self.root.geometry("900x700")
         
         self.api_key = "AIzaSyBeUr2C3SDkwY7zIrYcB6agDni9XDlWrFY"
         self.origen_coords = "19.4283717,-99.1430307"
+        self.origen_name = "TSJCDMX - Niños Héroes 150"
         self.archivo_excel = None
         
-        self.setup_ui_simple()
+        self.setup_ui()
 
-    def setup_ui_simple(self):
-        """Interfaz mínima para ahorrar memoria"""
+    def setup_ui(self):
+        """Interfaz completa"""
         main_frame = ttk.Frame(self.root, padding="10")
         main_frame.pack(fill=tk.BOTH, expand=True)
         
-        # Header simple
-        ttk.Label(main_frame, text="🚀 SISTEMA RUTAS RÁPIDO", 
-                 font=('Arial', 16, 'bold')).pack(pady=10)
+        # Header
+        ttk.Label(main_frame, text="🚀 SISTEMA RUTAS CON AGRUPACIÓN INTELIGENTE", 
+                 font=('Arial', 14, 'bold')).pack(pady=10)
         
-        # Controles básicos
+        ttk.Label(main_frame, text="Agrupa automáticamente personas en la misma dirección", 
+                 font=('Arial', 10)).pack(pady=5)
+        
+        # Controles
         control_frame = ttk.Frame(main_frame)
         control_frame.pack(fill=tk.X, pady=10)
         
         ttk.Button(control_frame, text="📂 CARGAR EXCEL", 
-                  command=self.cargar_excel_simple).pack(side=tk.LEFT, padx=5)
+                  command=self.cargar_excel).pack(side=tk.LEFT, padx=5)
         
-        self.btn_generar = ttk.Button(control_frame, text="🚀 GENERAR RUTAS", 
-                                     command=self.generar_rutas_simple, state='disabled')
+        self.btn_generar = ttk.Button(control_frame, text="🚀 GENERAR RUTAS CON AGRUPACIÓN", 
+                                     command=self.generar_rutas, state='disabled')
         self.btn_generar.pack(side=tk.LEFT, padx=5)
         
-        ttk.Button(control_frame, text="🔄 LIMPIAR", 
+        ttk.Button(control_frame, text="🔄 LIMPIAR TODO", 
                   command=self.limpiar_sistema).pack(side=tk.LEFT, padx=5)
+        
+        ttk.Button(control_frame, text="📁 ABRIR CARPETA EXCEL", 
+                  command=lambda: self.abrir_carpeta('rutas_excel')).pack(side=tk.LEFT, padx=5)
         
         # Info archivo
         self.file_label = ttk.Label(main_frame, text="No hay archivo cargado", 
-                                   foreground='red')
+                                   foreground='red', font=('Arial', 10))
         self.file_label.pack(pady=5)
         
-        # Log simplificado
-        log_frame = ttk.LabelFrame(main_frame, text="Progreso", padding="10")
+        # Progress
+        self.progress = ttk.Progressbar(main_frame, mode='indeterminate')
+        self.progress.pack(fill=tk.X, pady=5)
+        
+        self.progress_label = ttk.Label(main_frame, text="Listo")
+        self.progress_label.pack()
+        
+        # Log
+        log_frame = ttk.LabelFrame(main_frame, text="Progreso de Generación", padding="10")
         log_frame.pack(fill=tk.BOTH, expand=True)
         
-        self.log_text = scrolledtext.ScrolledText(log_frame, height=15, wrap=tk.WORD)
+        self.log_text = scrolledtext.ScrolledText(log_frame, height=20, wrap=tk.WORD)
         self.log_text.pack(fill=tk.BOTH, expand=True)
 
     def log(self, mensaje):
-        """Log simple"""
+        """Log en la interfaz"""
         timestamp = datetime.now().strftime("%H:%M:%S")
         self.log_text.insert(tk.END, f"[{timestamp}] {mensaje}\n")
         self.log_text.see(tk.END)
         self.root.update()
 
-    def cargar_excel_simple(self):
-        """Carga rápida de Excel"""
-        archivo = filedialog.askopenfilename(filetypes=[("Excel", "*.xlsx")])
+    def cargar_excel(self):
+        """Cargar Excel"""
+        archivo = filedialog.askopenfilename(
+            title="Seleccionar archivo Excel", 
+            filetypes=[("Excel files", "*.xlsx")]
+        )
         if archivo:
             try:
-                # Carga mínima
                 self.df = pd.read_excel(archivo)
                 self.archivo_excel = archivo
-                self.file_label.config(text=f"✅ {os.path.basename(archivo)} - {len(self.df)} registros")
+                
+                nombre_archivo = os.path.basename(archivo)
+                self.file_label.config(text=f"✅ {nombre_archivo} - {len(self.df)} registros", foreground='green')
                 self.btn_generar.config(state='normal')
-                self.log(f"📊 Excel cargado: {len(self.df)} registros")
+                self.log(f"📊 Excel cargado: {nombre_archivo}")
+                self.log(f"📈 Registros totales: {len(self.df)}")
+                
             except Exception as e:
-                self.log(f"❌ Error: {str(e)}")
+                self.log(f"❌ ERROR cargando Excel: {str(e)}")
 
-    def generar_rutas_simple(self):
-        """Generación en hilo separado"""
+    def generar_rutas(self):
+        """Generar rutas en hilo separado"""
         if not hasattr(self, 'df'):
             return
             
-        self.log("🚀 INICIANDO GENERACIÓN RÁPIDA...")
+        self.log("🚀 INICIANDO GENERACIÓN CON AGRUPACIÓN...")
         self.btn_generar.config(state='disabled')
+        self.progress.start()
+        self.progress_label.config(text="Generando rutas...")
         
         def proceso():
             try:
@@ -363,43 +452,84 @@ class SistemaRutasSimpleGUI:
                     df=self.df,
                     api_key=self.api_key,
                     origen_coords=self.origen_coords,
-                    origen_name="TSJCDMX",
+                    origen_name=self.origen_name,
                     max_stops_per_route=8
                 )
                 
-                # Usar el generador rápido
-                resultados = generator.generate_routes_fast()
+                # Redirigir logs a la interfaz
+                generator._log = self.log
                 
-                # Mostrar resultados
+                resultados = generator.generate_routes()
+                
+                # Mostrar resultados en el hilo principal
                 self.root.after(0, lambda: self.mostrar_resultados(resultados))
                 
             except Exception as e:
-                self.root.after(0, lambda: self.log(f"❌ ERROR: {str(e)}"))
-                self.root.after(0, lambda: self.btn_generar.config(state='normal'))
+                self.root.after(0, lambda: self.log(f"❌ ERROR CRÍTICO: {str(e)}"))
+                self.root.after(0, lambda: self.finalizar_proceso())
         
         threading.Thread(target=proceso, daemon=True).start()
 
     def mostrar_resultados(self, resultados):
         """Mostrar resultados finales"""
+        self.finalizar_proceso()
+        
         if resultados:
             total_rutas = len(resultados)
-            total_puntos = sum(r['puntos'] for r in resultados)
-            self.log(f"🎉 ¡{total_rutas} RUTAS GENERADAS!")
+            total_puntos = sum(r['puntos_entrega'] for r in resultados)
+            total_personas = sum(r['personas_totales'] for r in resultados)
+            
+            eficiencia = f"{(1 - (total_puntos / total_personas)) * 100:.1f}%" if total_personas > 0 else "0%"
+            
+            self.log("🎉 " + "="*50)
+            self.log(f"🎯 GENERACIÓN COMPLETADA EXITOSAMENTE")
+            self.log(f"📊 {total_rutas} rutas generadas")
             self.log(f"📍 {total_puntos} puntos de entrega")
-            messagebox.showinfo("Éxito", f"¡{total_rutas} rutas generadas!\nRevisa la carpeta 'rutas_excel'")
+            self.log(f"👥 {total_personas} personas totales") 
+            self.log(f"⚡ Eficiencia de agrupación: {eficiencia}")
+            self.log("🎉 " + "="*50)
+            
+            messagebox.showinfo(
+                "¡Éxito!", 
+                f"¡{total_rutas} rutas generadas!\n\n"
+                f"• {total_puntos} puntos de entrega\n"
+                f"• {total_personas} personas\n"
+                f"• Eficiencia: {eficiencia}\n\n"
+                f"Revisa la carpeta 'rutas_excel'"
+            )
         else:
             self.log("❌ No se pudieron generar rutas")
-            
+            messagebox.showerror("Error", "No se pudieron generar rutas. Revisa el log.")
+
+    def finalizar_proceso(self):
+        """Finalizar proceso"""
+        self.progress.stop()
+        self.progress_label.config(text="Listo")
         self.btn_generar.config(state='normal')
 
     def limpiar_sistema(self):
-        """Limpieza simple"""
-        carpetas = ['rutas_excel', 'mapas_pro']
-        for carpeta in carpetas:
-            if os.path.exists(carpeta):
-                shutil.rmtree(carpeta)
-                os.makedirs(carpeta)
-        self.log("🧹 Sistema limpiado")
+        """Limpiar sistema"""
+        if messagebox.askyesno("Limpiar", "¿Borrar todas las rutas generadas?"):
+            carpetas = ['rutas_excel', 'mapas_pro']
+            for carpeta in carpetas:
+                if os.path.exists(carpeta):
+                    shutil.rmtree(carpeta)
+                    os.makedirs(carpeta)
+            self.log("🧹 Sistema limpiado completamente")
+
+    def abrir_carpeta(self, carpeta):
+        """Abrir carpeta"""
+        if os.path.exists(carpeta):
+            try:
+                if sys.platform == "win32":
+                    os.startfile(carpeta)
+                else:
+                    subprocess.Popen(['xdg-open', carpeta])
+                self.log(f"📁 Abriendo carpeta: {carpeta}")
+            except Exception as e:
+                self.log(f"❌ Error abriendo carpeta: {e}")
+        else:
+            self.log(f"📁 Carpeta {carpeta} no existe")
 
 # =============================================================================
 # EJECUCIÓN PRINCIPAL
@@ -409,7 +539,7 @@ if __name__ == "__main__":
     for carpeta in ['rutas_excel', 'mapas_pro']:
         os.makedirs(carpeta, exist_ok=True)
     
-    # Iniciar interfaz
+    # Iniciar aplicación
     root = tk.Tk()
-    app = SistemaRutasSimpleGUI(root)
+    app = SistemaRutasGUI(root)
     root.mainloop()
