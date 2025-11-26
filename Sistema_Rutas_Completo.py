@@ -317,7 +317,7 @@ class GestorTelegram:
             return False
 
 # =============================================================================
-# CLASE PRINCIPAL - MOTOR DE RUTAS (CoreRouteGenerator) - MEJORADO
+# CLASE PRINCIPAL - MOTOR DE RUTAS (CoreRouteGenerator) - CORREGIDO
 # =============================================================================
 class CoreRouteGenerator:
     def __init__(self, df, api_key, origen_coords, origen_name, max_stops_per_route):
@@ -379,7 +379,7 @@ class CoreRouteGenerator:
         return None
 
     def _agrupar_ubicaciones_similares(self, filas):
-        """Agrupa personas en la misma ubicación física"""
+        """Agrupa personas en la misma ubicación física - MEJORADO"""
         grupos = []
         coordenadas_procesadas = []
         
@@ -396,8 +396,8 @@ class CoreRouteGenerator:
             agrupado = False
             for i, (coord_existente, grupo_existente) in enumerate(grupos):
                 distancia = self._calcular_distancia(coords, coord_existente)
-                # Si están a menos de 100 metros, considerar misma ubicación
-                if distancia < 0.1:  # 100 metros
+                # Si están a menos de 200 metros, considerar misma ubicación
+                if distancia < 0.2:  # 200 metros
                     grupo_existente.append(fila)
                     agrupado = True
                     self._log(f"📍 Agrupando {fila.get('NOMBRE', '')[:20]}... con grupo existente")
@@ -424,17 +424,16 @@ class CoreRouteGenerator:
         c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
         return R * c
 
-    def _optimizar_ruta(self, indices):
-        filas = self.df.loc[indices]
-        
-        # Agrupar ubicaciones similares
-        grupos_ubicaciones = self._agrupar_ubicaciones_similares(filas)
-        
-        coords_list = []
+    def _optimizar_ruta(self, grupos_ubicaciones):
+        """Optimiza la ruta considerando grupos de ubicaciones - CORREGIDO"""
+        if not grupos_ubicaciones:
+            self._log("No hay grupos de ubicaciones para optimizar")
+            return [], [], 0, 0, None
+            
+        coords_list = [grupo[0] for grupo in grupos_ubicaciones]  # coordenadas de cada grupo
         filas_agrupadas = []
         
         for coords, grupo_filas in grupos_ubicaciones:
-            coords_list.append(coords)
             filas_agrupadas.append({
                 'coordenadas': coords,
                 'personas': grupo_filas,
@@ -442,8 +441,9 @@ class CoreRouteGenerator:
             })
         
         if len(coords_list) < 2:
-            self._log(f"Not enough valid coordinates (found {len(coords_list)}) for route optimization. Skipping.")
-            return filas_agrupadas, [], 0, 0, None
+            # 🆕 CORRECCIÓN: Si solo hay una ubicación, igual crear la ruta
+            self._log(f"⚠️ Solo una ubicación en esta ruta - Creando ruta con {len(filas_agrupadas[0]['personas'])} personas")
+            return filas_agrupadas, coords_list, 30, 5, None  # Valores estimados
             
         waypoints = "|".join([f"{lat},{lng}" for lat, lng in coords_list])
         url = "https://maps.googleapis.com/maps/api/directions/json"
@@ -469,22 +469,33 @@ class CoreRouteGenerator:
                 
                 return filas_opt, coords_opt, tiempo, dist, poly
             else:
-                self._log(f"Directions API error: {data.get('status')}")
-                return filas_agrupadas, [], 0, 0, None
+                self._log(f"⚠️ Directions API error: {data.get('status')} - Usando orden original")
+                # Fallback: usar orden original
+                return filas_agrupadas, coords_list, 45, 8, None
         except Exception as e:
-            self._log(f"Error optimizing route: {str(e)}")
-            return filas_agrupadas, [], 0, 0, None
+            self._log(f"⚠️ Error optimizing route: {str(e)} - Usando orden original")
+            return filas_agrupadas, coords_list, 45, 8, None
 
     def _crear_ruta_archivos(self, zona, indices, ruta_id):
-        filas_opt, coords_opt, tiempo, dist, poly = self._optimizar_ruta(indices)
-        if len(filas_opt) == 0:
-            self._log(f"No valid stops for Route {ruta_id} - {zona}.")
+        """Crea archivos de ruta - MEJORADO para manejar ubicaciones únicas"""
+        # Primero agrupar las ubicaciones
+        filas = self.df.loc[indices]
+        grupos_ubicaciones = self._agrupar_ubicaciones_similares(filas)
+        
+        if len(grupos_ubicaciones) == 0:
+            self._log(f"❌ No hay ubicaciones válidas para Ruta {ruta_id} - {zona}")
             return None
             
+        # 🆕 CORRECCIÓN: Permitir rutas con una sola ubicación pero múltiples personas
+        self._log(f"📍 Ruta {ruta_id}: {len(grupos_ubicaciones)} ubicaciones, {sum(len(g[1]) for g in grupos_ubicaciones)} personas")
+            
+        # Optimizar ruta (ahora maneja el caso de una sola ubicación)
+        filas_opt, coords_opt, tiempo, dist, poly = self._optimizar_ruta(grupos_ubicaciones)
+        
         os.makedirs("mapas_pro", exist_ok=True)
         os.makedirs("rutas_excel", exist_ok=True)
         
-        # 🆕 EXCEL MEJORADO CON LINKS DE FOTOS Y AGRUPAMIENTO
+        # Crear Excel
         excel_data = []
         orden_parada = 1
         
@@ -493,9 +504,7 @@ class CoreRouteGenerator:
             personas_grupo = grupo['personas']
             cantidad_personas = grupo['cantidad_personas']
             
-            # Para cada persona en el grupo, crear una fila en Excel
             for i, persona in enumerate(personas_grupo):
-                # Crear link para foto (vulnerabilidad controlada)
                 link_foto_base = f"fotos_entregas/Ruta_{ruta_id}_Parada_{orden_parada}"
                 if cantidad_personas > 1:
                     link_foto_base += f"_Persona_{i+1}"
@@ -518,16 +527,15 @@ class CoreRouteGenerator:
                     'Notas': f"Grupo de {cantidad_personas} personas" if cantidad_personas > 1 and i == 0 else ''
                 })
             
-            # Solo incrementar el orden principal cuando cambiamos de ubicación
             orden_parada += 1
         
         excel_df = pd.DataFrame(excel_data)
         excel_file = f"rutas_excel/Ruta_{ruta_id}_{zona}.xlsx"
         try:
             excel_df.to_excel(excel_file, index=False)
-            self._log(f"Generated Excel: {excel_file}")
+            self._log(f"✅ Generated Excel: {excel_file}")
         except Exception as e:
-            self._log(f"Error generating Excel: {str(e)}")
+            self._log(f"❌ Error generating Excel: {str(e)}")
             
         # Crear mapa
         map_origin_coords = list(map(float, self.origen_coords.split(',')))
@@ -541,7 +549,7 @@ class CoreRouteGenerator:
             icon=folium.Icon(color='green', icon='balance-scale', prefix='fa')
         ).add_to(m)
         
-        # Ruta optimizada
+        # Ruta optimizada (solo si hay polyline)
         if poly:
             folium.PolyLine(polyline.decode(poly), color=color, weight=6, opacity=0.8).add_to(m)
         
@@ -552,7 +560,6 @@ class CoreRouteGenerator:
             nombre = str(primera_persona.get('NOMBRE', 'N/A')).split(',')[0]
             direccion = str(primera_persona.get('DIRECCIÓN', 'N/A'))[:70]
             
-            # Personalizar popup según cantidad de personas
             if cantidad_personas > 1:
                 popup_html = f"""
                 <div style='font-family:Arial; width:300px;'>
@@ -603,9 +610,9 @@ class CoreRouteGenerator:
         mapa_file = f"mapas_pro/Ruta_{ruta_id}_{zona}.html"
         try:
             m.save(mapa_file)
-            self._log(f"Generated Map: {mapa_file}")
+            self._log(f"✅ Generated Map: {mapa_file}")
         except Exception as e:
-            self._log(f"Error generating map: {str(e)}")
+            self._log(f"❌ Error generating map: {str(e)}")
             
         # GENERAR DATOS PARA TELEGRAM
         waypoints_param = "|".join([f"{lat},{lng}" for lat, lng in coords_opt])
@@ -762,11 +769,40 @@ class CoreRouteGenerator:
         
         df_clean['Zona'] = df_clean['Alcaldia'].apply(asignar_zona)
         
+        # 🆕 CORRECCIÓN CRÍTICA: Distribuir mejor las ubicaciones entre rutas
         subgrupos = {}
         for zona in df_clean['Zona'].unique():
-            dirs = df_clean[df_clean['Zona'] == zona].index.tolist()
-            subgrupos[zona] = [dirs[i:i+self.max_stops_per_route] for i in range(0, len(dirs), self.max_stops_per_route)]
-            self._log(f"{zona}: {len(dirs)} addresses to {len(subgrupos[zona])} routes")
+            # Obtener todas las filas de esta zona
+            filas_zona = df_clean[df_clean['Zona'] == zona]
+            
+            # Primero agrupar por ubicación
+            grupos_ubicaciones = self._agrupar_ubicaciones_similares(filas_zona)
+            
+            # Distribuir los grupos entre rutas
+            rutas_zona = []
+            ruta_actual = []
+            personas_en_ruta = 0
+            
+            for coords, grupo_filas in grupos_ubicaciones:
+                cantidad_personas = len(grupo_filas)
+                
+                # Si agregar este grupo excede el límite, crear nueva ruta
+                if personas_en_ruta + cantidad_personas > self.max_stops_per_route and ruta_actual:
+                    rutas_zona.append(ruta_actual)
+                    ruta_actual = []
+                    personas_en_ruta = 0
+                
+                # Agregar grupo a la ruta actual
+                indices_grupo = [idx for idx, _ in grupo_filas]
+                ruta_actual.extend(indices_grupo)
+                personas_en_ruta += cantidad_personas
+            
+            # Agregar la última ruta si tiene contenido
+            if ruta_actual:
+                rutas_zona.append(ruta_actual)
+            
+            subgrupos[zona] = rutas_zona
+            self._log(f"📍 {zona}: {len(grupos_ubicaciones)} ubicaciones → {len(rutas_zona)} rutas")
         
         self._log("Generating Optimized Routes...")
         self.results = []
@@ -775,13 +811,14 @@ class CoreRouteGenerator:
         
         for zona in subgrupos.keys():
             for i, grupo in enumerate(subgrupos[zona]):
-                self._log(f"Processing Route {ruta_id} of {total_routes_to_process}: {zona}")
+                self._log(f"🔄 Processing Route {ruta_id} of {total_routes_to_process}: {zona}")
                 try:
                     result = self._crear_ruta_archivos(zona, grupo, ruta_id)
                     if result:
                         self.results.append(result)
+                        self._log(f"✅ Ruta {ruta_id} creada: {result['paradas']} paradas, {result['personas']} personas")
                 except Exception as e:
-                    self._log(f"Error in route {ruta_id}: {str(e)}")
+                    self._log(f"❌ Error in route {ruta_id}: {str(e)}")
                 ruta_id += 1
         
         try:
@@ -789,7 +826,7 @@ class CoreRouteGenerator:
                 json.dump(self.GEOCODE_CACHE, f)
             self._log("Geocode cache saved.")
         except Exception as e:
-            self._log(f"Error saving cache: {str(e)}")
+            self._log(f"❌ Error saving cache: {str(e)}")
         
         if self.results:
             resumen_df = pd.DataFrame([{
@@ -804,9 +841,9 @@ class CoreRouteGenerator:
             } for r in self.results])
             try:
                 resumen_df.to_excel("RESUMEN_RUTAS.xlsx", index=False)
-                self._log("Summary 'RESUMEN_RUTAS.xlsx' generated.")
+                self._log("✅ Summary 'RESUMEN_RUTAS.xlsx' generated.")
             except Exception as e:
-                self._log(f"Error generating summary: {str(e)}")
+                self._log(f"❌ Error generating summary: {str(e)}")
         
         total_routes_gen = len(self.results)
         total_paradas = sum(r['paradas'] for r in self.results) if self.results else 0
@@ -814,8 +851,8 @@ class CoreRouteGenerator:
         total_distancia = sum(r['distancia'] for r in self.results) if self.results else 0
         total_tiempo = sum(r['tiempo'] for r in self.results) if self.results else 0
         
-        self._log("CORE ROUTE GENERATION COMPLETED")
-        self._log(f"FINAL SUMMARY: {total_routes_gen} routes, {total_paradas} paradas, {total_personas} personas")
+        self._log("🎉 CORE ROUTE GENERATION COMPLETED")
+        self._log(f"📊 FINAL SUMMARY: {total_routes_gen} routes, {total_paradas} paradas, {total_personas} personas")
         return self.results
 
 # =============================================================================
