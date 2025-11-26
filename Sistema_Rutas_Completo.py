@@ -378,12 +378,9 @@ class CoreRouteGenerator:
             self._log(f"Unexpected error in geocode for {d[:50]}...: {str(e)}")
         return None
 
-   def _agrupar_ubicaciones_similares(self, filas):
-    """Agrupa personas en la misma ubicación física - VERSIÓN CORREGIDA"""
+def _agrupar_ubicaciones_similares(self, filas):
+    """Agrupa personas en la misma ubicación física - VERSIÓN SUPER SIMPLE"""
     grupos = []
-    
-    # 🆕 CORRECCIÓN: Crear una lista de (índice, fila, coordenadas) primero
-    datos_con_coords = []
     
     for index, fila in filas.iterrows():
         direccion = str(fila.get('DIRECCIÓN', '')).strip()
@@ -391,32 +388,23 @@ class CoreRouteGenerator:
             continue
             
         coords = self._geocode(direccion)
-        if coords:
-            datos_con_coords.append((index, fila, coords))
-    
-    # Ahora agrupar por coordenadas similares
-    for index, fila, coords in datos_con_coords:
-        agrupado = False
-        
-        for i, (coord_existente, indices_existentes, filas_existentes) in enumerate(grupos):
-            distancia = self._calcular_distancia(coords, coord_existente)
-            if distancia < 0.2:  # 200 metros
-                indices_existentes.append(index)
-                filas_existentes.append(fila)
-                agrupado = True
-                self._log(f"📍 Agrupando {fila.get('NOMBRE', '')[:20]}... con grupo existente")
+        if not coords:
+            continue
+            
+        # Búsqueda simple
+        encontrado = False
+        for coord_exist, grupo_filas in grupos:
+            if self._calcular_distancia(coords, coord_exist) < 0.2:
+                grupo_filas.append(fila)
+                encontrado = True
+                self._log(f"📍 Agrupando {fila.get('NOMBRE', '')[:20]}...")
                 break
         
-        if not agrupado:
-            grupos.append((coords, [index], [fila]))
+        if not encontrado:
+            grupos.append((coords, [fila]))
     
-    # 🆕 Devolver en formato compatible con el resto del código
-    grupos_compatibles = []
-    for coords, indices, filas_grupo in grupos:
-        grupos_compatibles.append((coords, filas_grupo))
-    
-    return grupos_compatibles
-
+    return grupos
+       
     def _calcular_distancia(self, coord1, coord2):
         """Calcula distancia en kilómetros entre dos coordenadas"""
         lat1, lon1 = coord1
