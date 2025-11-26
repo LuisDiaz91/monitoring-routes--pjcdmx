@@ -701,7 +701,7 @@ def _agrupar_ubicaciones_similares(self, filas):
             'telegram_file': telegram_file
         }
 
-   def generate_routes(self):
+def generate_routes(self):
     self._log("Starting Core Route Generation Process")
     self._log(f"Initial data records: {len(self.df)}")
     if self.df.empty:
@@ -725,6 +725,7 @@ def _agrupar_ubicaciones_similares(self, filas):
         self._log("'DIRECCIÓN' column not found.")
         return []
     
+    # 🆕 MOVER LA FUNCIÓN extraer_alcaldia FUERA o definirla correctamente
     def extraer_alcaldia(d):
         d = str(d).upper()
         alcaldias = {
@@ -765,62 +766,34 @@ def _agrupar_ubicaciones_similares(self, filas):
     
     df_clean['Zona'] = df_clean['Alcaldia'].apply(asignar_zona)
     
-    # 🆕 CORRECCIÓN CRÍTICA: Distribuir mejor las ubicaciones entre rutas
+    # 🆕 CORRECCIÓN: Distribución simplificada de rutas
     subgrupos = {}
     for zona in df_clean['Zona'].unique():
-        # Obtener todas las filas de esta zona
         filas_zona = df_clean[df_clean['Zona'] == zona]
-        
-        # Primero agrupar por ubicación
         grupos_ubicaciones = self._agrupar_ubicaciones_similares(filas_zona)
         
-        # 🆕 CORRECCIÓN: Distribución más simple y robusta
         rutas_zona = []
-        ruta_actual_indices = []
-        total_personas_en_ruta = 0
+        ruta_actual = []
         
         for coords, grupo_filas in grupos_ubicaciones:
-            cantidad_personas = len(grupo_filas)
+            # Si agregar este grupo excede el límite, crear nueva ruta
+            if len(ruta_actual) + len(grupo_filas) > self.max_stops_per_route and ruta_actual:
+                rutas_zona.append(ruta_actual)
+                ruta_actual = []
             
-            # Obtener los índices originales de estas filas
-            indices_grupo = []
+            # Agregar todas las filas del grupo
             for fila in grupo_filas:
-                # Buscar el índice en el DataFrame original usando múltiples criterios
+                # Buscar el índice original en el DataFrame
                 mask = (
                     (self.df['NOMBRE'].astype(str) == str(fila.get('NOMBRE', ''))) & 
                     (self.df['DIRECCIÓN'].astype(str) == str(fila.get('DIRECCIÓN', '')))
                 )
                 match = self.df[mask]
                 if not match.empty:
-                    indices_grupo.append(match.index[0])
-                else:
-                    # Fallback: buscar por nombre solamente
-                    mask_nombre = (self.df['NOMBRE'].astype(str) == str(fila.get('NOMBRE', '')))
-                    match_nombre = self.df[mask_nombre]
-                    if not match_nombre.empty:
-                        indices_grupo.append(match_nombre.index[0])
-                    else:
-                        # Último fallback: usar el primer índice disponible
-                        self._log(f"⚠️ No se pudo encontrar índice exacto para: {fila.get('NOMBRE', '')[:20]}")
-                        if len(self.df) > 0:
-                            indices_grupo.append(self.df.index[0])
-            
-            # Si al agregar este grupo nos pasamos del límite, empezar nueva ruta
-            if total_personas_en_ruta + cantidad_personas > self.max_stops_per_route and ruta_actual_indices:
-                rutas_zona.append(ruta_actual_indices)
-                self._log(f"  🚀 Nueva ruta: {len(ruta_actual_indices)} personas")
-                ruta_actual_indices = []
-                total_personas_en_ruta = 0
-            
-            # Agregar grupo a la ruta actual
-            ruta_actual_indices.extend(indices_grupo)
-            total_personas_en_ruta += cantidad_personas
-            self._log(f"  📦 Grupo agregado: {cantidad_personas} personas (total en ruta: {total_personas_en_ruta})")
+                    ruta_actual.append(match.index[0])
         
-        # Agregar la última ruta si tiene contenido
-        if ruta_actual_indices:
-            rutas_zona.append(ruta_actual_indices)
-            self._log(f"  🚀 Última ruta: {len(ruta_actual_indices)} personas")
+        if ruta_actual:
+            rutas_zona.append(ruta_actual)
         
         subgrupos[zona] = rutas_zona
         self._log(f"📍 {zona}: {len(grupos_ubicaciones)} ubicaciones → {len(rutas_zona)} rutas")
@@ -828,24 +801,19 @@ def _agrupar_ubicaciones_similares(self, filas):
     self._log("Generating Optimized Routes...")
     self.results = []
     ruta_id = 1
-    total_routes_to_process = sum(len(grupos) for grupos in subgrupos.values())
     
     for zona in subgrupos.keys():
-        for i, grupo_indices in enumerate(subgrupos[zona]):
-            self._log(f"🔄 Processing Route {ruta_id} of {total_routes_to_process}: {zona}")
+        for grupo in subgrupos[zona]:
+            self._log(f"🔄 Processing Route {ruta_id}: {zona}")
             try:
-                result = self._crear_ruta_archivos(zona, grupo_indices, ruta_id)
+                result = self._crear_ruta_archivos(zona, grupo, ruta_id)
                 if result:
                     self.results.append(result)
-                    self._log(f"✅ Ruta {ruta_id} creada: {result['paradas']} paradas, {result['personas']} personas")
-                else:
-                    self._log(f"⚠️ Ruta {ruta_id} no pudo ser creada")
             except Exception as e:
                 self._log(f"❌ Error in route {ruta_id}: {str(e)}")
-                import traceback
-                self._log(f"❌ Traceback: {traceback.format_exc()}")
             ruta_id += 1
     
+    # Guardar cache y generar resumen
     try:
         with open(self.CACHE_FILE, 'w') as f:
             json.dump(self.GEOCODE_CACHE, f)
@@ -854,108 +822,7 @@ def _agrupar_ubicaciones_similares(self, filas):
         self._log(f"❌ Error saving cache: {str(e)}")
     
     if self.results:
-        resumen_df = pd.DataFrame([{
-            'Ruta': r['ruta_id'],
-            'Zona': r['zona'],
-            'Paradas': r['paradas'],
-            'Personas': r['personas'],
-            'Distancia_km': r['distancia'],
-            'Tiempo_min': r['tiempo'],
-            'Excel': os.path.basename(r['excel']),
-            'Mapa': os.path.basename(r['mapa'])
-        } for r in self.results])
         try:
-            resumen_df.to_excel("RESUMEN_RUTAS.xlsx", index=False)
-            self._log("✅ Summary 'RESUMEN_RUTAS.xlsx' generated.")
-        except Exception as e:
-            self._log(f"❌ Error generating summary: {str(e)}")
-    
-    total_routes_gen = len(self.results)
-    total_paradas = sum(r['paradas'] for r in self.results) if self.results else 0
-    total_personas = sum(r['personas'] for r in self.results) if self.results else 0
-    total_distancia = sum(r['distancia'] for r in self.results) if self.results else 0
-    total_tiempo = sum(r['tiempo'] for r in self.results) if self.results else 0
-    
-    self._log("🎉 CORE ROUTE GENERATION COMPLETED")
-    self._log(f"📊 FINAL SUMMARY: {total_routes_gen} routes, {total_paradas} paradas, {total_personas} personas")
-    
-    # 🆕 LOG ADICIONAL: Mostrar distribución por zona
-    self._log("📈 DISTRIBUCIÓN POR ZONA:")
-    for zona in subgrupos.keys():
-        rutas_zona = subgrupos[zona]
-        total_personas_zona = sum(len(ruta) for ruta in rutas_zona)
-        self._log(f"   {zona}: {len(rutas_zona)} rutas, {total_personas_zona} personas")
-    
-    return self.results
-        
-        def asignar_zona(alc):
-            for zona_name, alcaldias_in_zone in ZONAS.items():
-                if alc in alcaldias_in_zone:
-                    return zona_name
-            return 'OTRAS'
-        
-        df_clean['Zona'] = df_clean['Alcaldia'].apply(asignar_zona)
-        
-        # 🆕 CORRECCIÓN CRÍTICA: Distribuir mejor las ubicaciones entre rutas
-        subgrupos = {}
-        for zona in df_clean['Zona'].unique():
-            # Obtener todas las filas de esta zona
-            filas_zona = df_clean[df_clean['Zona'] == zona]
-            
-            # Primero agrupar por ubicación
-            grupos_ubicaciones = self._agrupar_ubicaciones_similares(filas_zona)
-            
-            # Distribuir los grupos entre rutas
-            rutas_zona = []
-            ruta_actual = []
-            personas_en_ruta = 0
-            
-            for coords, grupo_filas in grupos_ubicaciones:
-                cantidad_personas = len(grupo_filas)
-                
-                # Si agregar este grupo excede el límite, crear nueva ruta
-                if personas_en_ruta + cantidad_personas > self.max_stops_per_route and ruta_actual:
-                    rutas_zona.append(ruta_actual)
-                    ruta_actual = []
-                    personas_en_ruta = 0
-                
-                # Agregar grupo a la ruta actual
-                indices_grupo = [idx for idx, _ in grupo_filas]
-                ruta_actual.extend(indices_grupo)
-                personas_en_ruta += cantidad_personas
-            
-            # Agregar la última ruta si tiene contenido
-            if ruta_actual:
-                rutas_zona.append(ruta_actual)
-            
-            subgrupos[zona] = rutas_zona
-            self._log(f"📍 {zona}: {len(grupos_ubicaciones)} ubicaciones → {len(rutas_zona)} rutas")
-        
-        self._log("Generating Optimized Routes...")
-        self.results = []
-        ruta_id = 1
-        total_routes_to_process = sum(len(grupos) for grupos in subgrupos.values())
-        
-        for zona in subgrupos.keys():
-            for i, grupo in enumerate(subgrupos[zona]):
-                self._log(f"🔄 Processing Route {ruta_id} of {total_routes_to_process}: {zona}")
-                try:
-                    result = self._crear_ruta_archivos(zona, grupo, ruta_id)
-                    if result:
-                        self.results.append(result)
-                        self._log(f"✅ Ruta {ruta_id} creada: {result['paradas']} paradas, {result['personas']} personas")
-                except Exception as e:
-                    self._log(f"❌ Error in route {ruta_id}: {str(e)}")
-                ruta_id += 1
-        
-        try:
-            with open(self.CACHE_FILE, 'w') as f:
-                json.dump(self.GEOCODE_CACHE, f)
-            self._log("Geocode cache saved.")
-        except Exception as e:
-            self._log(f"❌ Error saving cache: {str(e)}")
-        
-        if self.results:
             resumen_df = pd.DataFrame([{
                 'Ruta': r['ruta_id'],
                 'Zona': r['zona'],
@@ -966,21 +833,15 @@ def _agrupar_ubicaciones_similares(self, filas):
                 'Excel': os.path.basename(r['excel']),
                 'Mapa': os.path.basename(r['mapa'])
             } for r in self.results])
-            try:
-                resumen_df.to_excel("RESUMEN_RUTAS.xlsx", index=False)
-                self._log("✅ Summary 'RESUMEN_RUTAS.xlsx' generated.")
-            except Exception as e:
-                self._log(f"❌ Error generating summary: {str(e)}")
-        
-        total_routes_gen = len(self.results)
-        total_paradas = sum(r['paradas'] for r in self.results) if self.results else 0
-        total_personas = sum(r['personas'] for r in self.results) if self.results else 0
-        total_distancia = sum(r['distancia'] for r in self.results) if self.results else 0
-        total_tiempo = sum(r['tiempo'] for r in self.results) if self.results else 0
-        
-        self._log("🎉 CORE ROUTE GENERATION COMPLETED")
-        self._log(f"📊 FINAL SUMMARY: {total_routes_gen} routes, {total_paradas} paradas, {total_personas} personas")
-        return self.results
+            resumen_df.to_excel("RESUMEN_RUTAS.xlsx", index=False)
+            self._log("✅ Summary 'RESUMEN_RUTAS.xlsx' generated.")
+        except Exception as e:
+            self._log(f"❌ Error generating summary: {str(e)}")
+    
+    total_routes = len(self.results)
+    self._log(f"🎉 CORE ROUTE GENERATION COMPLETED: {total_routes} routes")
+    return self.results
+
 
 # =============================================================================
 # CLASE INTERFAZ GRÁFICA (SistemaRutasGUI) - VERSIÓN FINAL
