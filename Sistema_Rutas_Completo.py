@@ -1120,70 +1120,72 @@ class SistemaRutasGUI:
         thread.daemon = True
         thread.start()
 
-    def _procesar_rutas(self):
-        try:
-            self.log("🚀 INICIANDO GENERACIÓN DE RUTAS CON AGRUPAMIENTO...")
-            
-            # Limpiar carpetas
-            self._limpiar_carpetas_anteriores()
-            
-            # Cargar datos
-            df_completo = pd.read_excel(self.archivo_excel)
-            self.log(f"📊 Total de registros: {len(df_completo)}")
-            
-            # Usar todos los registros
-            df_filtrado = df_completo
-            self.log(f"✅ Procesando TODOS los registros: {len(df_filtrado)}")
-            
-            if len(df_filtrado) == 0:
-                self.log("❌ No hay datos")
-                return
-            
-            # Usar columnas guardadas
-            if hasattr(self, 'columnas_seleccionadas') and self.columnas_seleccionadas:
-                columna_direccion = self.columnas_seleccionadas['direccion']
-                columna_nombre = self.columnas_seleccionadas['nombre']
-                columna_adscripcion = self.columnas_seleccionadas['adscripcion']
-            else:
-                # Fallback a detección automática
-                columna_direccion = self._detectar_columna_direccion(df_filtrado)
-                columna_nombre = self._detectar_columna_nombre(df_filtrado)
-                columna_adscripcion = self._detectar_columna_adscripcion(df_filtrado)
-            
-            self.log(f"🎯 Usando columnas - Dirección: '{columna_direccion}', Nombre: '{columna_nombre}'")
-            
-            # Estandarizar
-            df_estandar = df_filtrado.copy()
-            df_estandar['DIRECCIÓN'] = df_filtrado[columna_direccion].astype(str)
-            df_estandar['NOMBRE'] = df_filtrado[columna_nombre].astype(str) if columna_nombre else 'Sin nombre'
-            df_estandar['ADSCRIPCIÓN'] = df_filtrado[columna_adscripcion].astype(str) if columna_adscripcion else 'Sin adscripción'
-            
-            self.log(f"🎯 Procesando {len(df_estandar)} registros...")
-            
-            # Generar rutas
-            generator = CoreRouteGenerator(
-                df=df_estandar,
-                api_key=self.api_key,
-                origen_coords=self.origen_coords,
-                origen_name=self.origen_name,
-                max_stops_per_route=self.max_stops
-            )
+def _procesar_rutas(self):
+    try:
+        self.log("🚀 INICIANDO GENERACIÓN DE RUTAS CON AGRUPAMIENTO...")
+        
+        # Limpiar carpetas
+        self._limpiar_carpetas_anteriores()
+        
+        # Cargar datos
+        df_completo = pd.read_excel(self.archivo_excel)
+        self.log(f"📊 Total de registros: {len(df_completo)}")
+        
+        # Usar todos los registros
+        df_filtrado = df_completo
+        self.log(f"✅ Procesando TODOS los registros: {len(df_filtrado)}")
+        
+        if len(df_filtrado) == 0:
+            self.log("❌ No hay datos")
+            return
+        
+        # Usar columnas guardadas
+        if hasattr(self, 'columnas_seleccionadas') and self.columnas_seleccionadas:
+            columna_direccion = self.columnas_seleccionadas['direccion']
+            columna_nombre = self.columnas_seleccionadas['nombre']
+            columna_adscripcion = self.columnas_seleccionadas['adscripcion']
+        else:
+            # Fallback a detección automática
+            columna_direccion = self._detectar_columna_direccion(df_filtrado)
+            columna_nombre = self._detectar_columna_nombre(df_filtrado)
+            columna_adscripcion = self._detectar_columna_adscripcion(df_filtrado)
+        
+        self.log(f"🎯 Usando columnas - Dirección: '{columna_direccion}', Nombre: '{columna_nombre}'")
+        
+        # Estandarizar
+        df_estandar = df_filtrado.copy()
+        df_estandar['DIRECCIÓN'] = df_filtrado[columna_direccion].astype(str)
+        df_estandar['NOMBRE'] = df_filtrado[columna_nombre].astype(str) if columna_nombre else 'Sin nombre'
+        df_estandar['ADSCRIPCIÓN'] = df_filtrado[columna_adscripcion].astype(str) if columna_adscripcion else 'Sin adscripción'
+        
+        self.log(f"🎯 Procesando {len(df_estandar)} registros...")
 
-            # 🚀 ESTA LÍNEA FALTABA - LLAMAR AL MÉTODO generate_routes()
-resultados = generator.generate_routes()
+        # 🆕 CORRECCIÓN: QUITAR EL SEGUNDO TRY Y MANTENER TODO EN EL MISMO BLOQUE
             
-            if resultados:
-                self.log(f"🎉 ¡{len(resultados)} RUTAS GENERADAS CON AGRUPAMIENTO!")
-                self.log("📱 Las rutas están listas para asignar a repartidores via Telegram")
-                messagebox.showinfo("Éxito", f"¡{len(resultados)} rutas generadas!\n\nAhora puedes asignarlas a repartidores usando el botón 'ASIGNAR RUTAS'")
-            else:
-                self.log("❌ No se pudieron generar rutas")
-                
-        except Exception as e:
-            self.log(f"❌ ERROR: {str(e)}")
-            messagebox.showerror("Error", f"Error durante el procesamiento:\n{str(e)}")
-        finally:
-            self.root.after(0, self._finalizar_procesamiento)
+        # Generar rutas
+        generator = CoreRouteGenerator(
+            df=df_estandar,
+            api_key=self.api_key,
+            origen_coords=self.origen_coords,
+            origen_name=self.origen_name,
+            max_stops_per_route=self.max_stops
+        )
+
+        # 🚀 LLAMAR AL MÉTODO generate_routes()
+        resultados = generator.generate_routes()
+        
+        if resultados:
+            self.log(f"🎉 ¡{len(resultados)} RUTAS GENERADAS CON AGRUPAMIENTO!")
+            self.log("📱 Las rutas están listas para asignar a repartidores via Telegram")
+            messagebox.showinfo("Éxito", f"¡{len(resultados)} rutas generadas!\n\nAhora puedes asignarlas a repartidores usando el botón 'ASIGNAR RUTAS'")
+        else:
+            self.log("❌ No se pudieron generar rutas")
+            
+    except Exception as e:
+        self.log(f"❌ ERROR: {str(e)}")
+        messagebox.showerror("Error", f"Error durante el procesamiento:\n{str(e)}")
+    finally:
+        self.root.after(0, self._finalizar_procesamiento)
 
     def _finalizar_procesamiento(self):
         self.procesando = False
