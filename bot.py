@@ -100,6 +100,15 @@ def manejar_errores_telegram(f):
 # FUNCIONES AUXILIARES
 # =============================================================================
 
+def limpiar_texto_markdown(texto):
+    """Limpia texto para evitar problemas con Markdown"""
+    if not texto:
+        return ""
+    caracteres_problematicos = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
+    for char in caracteres_problematicos:
+        texto = texto.replace(char, f'\\{char}')
+    return texto
+
 def descargar_foto_telegram(file_id, tipo_foto="general"):
     """Descarga la foto real desde Telegram y la guarda en carpeta correspondiente"""
     try:
@@ -252,31 +261,38 @@ def cargar_rutas_disponibles():
 def formatear_ruta_para_repartidor(ruta):
     """Formatear ruta de manera SEGURA (sin Markdown problemático)"""
     try:
-        texto = "🗺️ *RUTA ASIGNADA*\n\n"
-        texto += f"*ID:* {ruta['ruta_id']}\n"
-        texto += f"*Zona:* {ruta['zona']}\n" 
-        texto += f"*Paradas:* {len(ruta['paradas'])}\n"
-        texto += f"*Distancia:* {ruta['estadisticas']['distancia_km']} km\n"
-        texto += f"*Tiempo:* {ruta['estadisticas']['tiempo_min']} min\n\n"
+        texto = "🗺️ RUTA ASIGNADA\n\n"
+        texto += f"ID: {ruta['ruta_id']}\n"
+        texto += f"Zona: {ruta['zona']}\n" 
+        texto += f"Paradas: {len(ruta['paradas'])}\n"
+        texto += f"Distancia: {ruta['estadisticas']['distancia_km']} km\n"
+        texto += f"Tiempo: {ruta['estadisticas']['tiempo_min']} min\n\n"
         
         entregadas = len([p for p in ruta['paradas'] if p.get('estado') == 'entregado'])
-        texto += f"*Progreso:* {entregadas}/{len(ruta['paradas'])}\n\n"
+        texto += f"Progreso: {entregadas}/{len(ruta['paradas'])}\n\n"
         
-        texto += "*Primeras 3 paradas:*\n"
+        texto += "Primeras 3 paradas:\n"
         for i, parada in enumerate(ruta['paradas'][:3], 1):
             estado = "✅" if parada.get('estado') == 'entregado' else "📍"
-            nombre_limpio = parada['nombre'].replace('*', '').replace('_', '').replace('`', '')  # 🆕 Limpiar caracteres
+            # 🆕 LIMPIEZA EXTRA SEGURA
+            nombre_limpio = limpiar_texto_markdown(parada['nombre'])
+            dependencia_limpia = limpiar_texto_markdown(parada.get('dependencia', ''))
+            
             texto += f"{estado} {parada['orden']}. {nombre_limpio}\n"
+            if dependencia_limpia:
+                texto += f"   🏢 {dependencia_limpia[:25]}...\n"
         
         if len(ruta['paradas']) > 3:
             texto += f"\n... y {len(ruta['paradas']) - 3} más\n"
+        
+        texto += "\n🚀 Usa /entregar para registrar entregas"
         
         return texto
         
     except Exception as e:
         print(f"❌ Error formateando ruta: {e}")
         return f"🗺️ Ruta {ruta['ruta_id']} - {ruta['zona']} ({len(ruta['paradas'])} paradas)"
-
+        
 def registrar_avance_pendiente(datos_avance):
     """🆕 Registrar un nuevo avance pendiente de sincronización"""
     try:
@@ -434,34 +450,39 @@ def set_webhook():
 # HANDLERS DE TELEGRAM
 # =============================================================================
 
-@manejar_errores_telegram
 @bot.message_handler(commands=['start', 'hola'])
 def enviar_bienvenida(message):
     print(f"🎯 COMANDO /start RECIBIDO de: {message.from_user.first_name}")
     try:
         welcome_text = f"""
-🤖 *BOT DE RUTAS AUTOMÁTICO - PJCDMX* 🚚
+🤖 BOT DE RUTAS AUTOMÁTICO - PJCDMX 🚚
 
 ¡Hola {message.from_user.first_name}! Soy tu asistente de rutas automáticas.
 
-*🚀 COMANDOS PRINCIPALES:*
+🚀 COMANDOS PRINCIPALES:
 /solicitar_ruta - 🗺️ Obtener ruta automáticamente
-/miruta - 📋 Ver mi ruta asignada
+/miruta - 📋 Ver mi ruta asignada  
 /entregar - 📦 Registrar entrega completada
 
-*📊 REPORTES Y SEGUIMIENTO:*
-/ubicacion - 📍 Enviar ubicación actual  
+📊 REPORTES Y SEGUIMIENTO:
+/ubicacion - 📍 Enviar ubicación actual
 /incidente - 🚨 Reportar incidente
 /foto - 📸 Enviar foto del incidente
 /estatus - 📈 Actualizar estado de entrega
 /atencionH - 👨‍💼 Soporte humano
 
-*¡El sistema asigna rutas automáticamente!*
+¡El sistema asigna rutas automáticamente!
         """
-        bot.reply_to(message, welcome_text, parse_mode='Markdown')
+        # 🆕 ENVIAR SIN MARKDOWN - SOLUCIÓN DEFINITIVA
+        bot.reply_to(message, welcome_text, parse_mode=None)
         print("✅ Mensaje de bienvenida ENVIADO")
     except Exception as e:
         print(f"❌ ERROR enviando mensaje: {e}")
+        # 🆕 FALLBACK EXTREMO
+        try:
+            bot.reply_to(message, "🤖 Bot PJCDMX - Usa /solicitar_ruta para comenzar")
+        except:
+            print("❌ ERROR CRÍTICO: No se pudo enviar ningún mensaje")
 
 @manejar_errores_telegram
 @bot.message_handler(commands=['solicitar_ruta'])
@@ -474,18 +495,15 @@ def solicitar_ruta_automatica(message):
         print(f"🔄 Solicitud de ruta de {user_name} (ID: {user_id})")
         
         if user_id in RUTAS_ASIGNADAS:
-            bot.reply_to(message, 
-                        "📭 *Ya tienes una ruta asignada.*\n\n"
-                        "Usa /miruta para ver tu ruta actual.",
-                        parse_mode='Markdown')
+            bot.reply_to(message, "⚠️ Ya tienes una ruta asignada. Usa /miruta para verla.")
             return
         
         rutas_disponibles = cargar_rutas_disponibles()
         
         if rutas_disponibles == 0:
             bot.reply_to(message, 
-                        "📭 *No hay rutas disponibles en este momento.*",
-                        parse_mode='Markdown')
+                        "📭 No hay rutas disponibles en este momento.",
+                        parse_mode=None)
             return
         
         ruta_asignada = RUTAS_DISPONIBLES.pop(0)
@@ -521,9 +539,8 @@ def solicitar_ruta_automatica(message):
         error_msg = f"❌ Error asignando ruta: {str(e)}"
         print(error_msg)
         bot.reply_to(message, 
-                    "❌ *Error al asignar ruta.*\n\n"
-                    "Por favor, intenta nuevamente.",
-                    parse_mode='Markdown')
+                    "❌ Error al asignar ruta.\n\nPor favor, intenta nuevamente.",
+                    parse_mode=None)
 
 @manejar_errores_telegram
 @bot.message_handler(commands=['miruta'])
@@ -533,9 +550,7 @@ def ver_mi_ruta(message):
     user_name = message.from_user.first_name
     
     if user_id not in RUTAS_ASIGNADAS:
-        bot.reply_to(message, 
-                    "📭 *No tienes una ruta asignada.*",
-                    parse_mode='Markdown')
+        bot.reply_to(message, "❌ No tienes una ruta asignada. Usa /solicitar_ruta para obtener una.")
         return
     
     ruta_id = RUTAS_ASIGNADAS[user_id]
@@ -564,9 +579,9 @@ def ver_mi_ruta(message):
                 print(f"❌ Error leyendo ruta {archivo}: {e}")
     
     bot.reply_to(message, 
-                "❌ *No se pudo encontrar tu ruta.*",
-                parse_mode='Markdown')
-    
+                "❌ No se pudo encontrar tu ruta.",
+                parse_mode=None)
+
 @manejar_errores_telegram  
 @bot.message_handler(content_types=['photo'])
 def manejar_foto(message):
@@ -635,18 +650,18 @@ def manejar_foto(message):
         
         if user_id in RUTAS_ASIGNADAS:
             if registrar_entrega_sistema(user_id, user, persona_entregada, ruta_foto_local, caption):
-                respuesta = f"📦 *ACUSE CON FOTO REGISTRADO* ¡Gracias {user}!\n\n✅ Entrega a *{persona_entregada}* registrada automáticamente.\n📸 Foto guardada en el sistema."
+                respuesta = f"📦 ACUSE CON FOTO REGISTRADO ¡Gracias {user}!\n\n✅ Entrega a {persona_entregada} registrada automáticamente.\n📸 Foto guardada en el sistema."
             else:
-                respuesta = f"📸 *FOTO DE ACUSE RECIBIDA* ¡Gracias {user}!\n\n*Persona:* {persona_entregada}\n⚠️ *Error registrando en sistema*"
+                respuesta = f"📸 FOTO DE ACUSE RECIBIDA ¡Gracias {user}!\n\nPersona: {persona_entregada}\n⚠️ Error registrando en sistema"
         else:
-            respuesta = f"📸 *FOTO DE ACUSE RECIBIDA* ¡Gracias {user}!\n\n*Persona:* {persona_entregada}\nℹ️ *No tienes ruta activa asignada*"
+            respuesta = f"📸 FOTO DE ACUSE RECIBIDA ¡Gracias {user}!\n\nPersona: {persona_entregada}\nℹ️ No tienes ruta activa asignada"
             
     elif any(word in caption.lower() for word in ['retrasado', 'problema', '⏳', '🚨']):
         tipo = 'foto_estatus'
-        respuesta = f"📊 *ESTATUS CON FOTO ACTUALIZADO* ¡Gracias {user}!\n\n📸 Foto de evidencia guardada en el sistema."
+        respuesta = f"📊 ESTATUS CON FOTO ACTUALIZADO ¡Gracias {user}!\n\n📸 Foto de evidencia guardada en el sistema."
     else:
         tipo = 'foto_incidente'
-        respuesta = f"📸 *FOTO RECIBIDA* ¡Gracias {user}!\n\n📝 Descripción: {caption}\n📸 Foto guardada en el sistema."
+        respuesta = f"📸 FOTO RECIBIDA ¡Gracias {user}!\n\n📝 Descripción: {caption}\n📸 Foto guardada en el sistema."
     
     cursor.execute('INSERT INTO incidentes (user_id, user_name, tipo, descripcion, foto_id) VALUES (?, ?, ?, ?, ?)',
                   (user_id, user, tipo, caption, ruta_foto_local))
@@ -664,9 +679,10 @@ def manejar_foto(message):
         }
         
         threading.Thread(target=actualizar_excel_desde_bot, args=(datos_entrega_excel,)).start()
+        
         print(f"🚀 Iniciando actualización automática de Excel para: {persona_entregada}")
     
-    bot.reply_to(message, respuesta, parse_mode='Markdown')
+    bot.reply_to(message, respuesta, parse_mode=None)
     print(f"📸 Procesamiento completado: {user} - Tipo: {tipo}")
 
 # =============================================================================
