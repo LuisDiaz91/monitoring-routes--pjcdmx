@@ -522,8 +522,16 @@ def solicitar_ruta_automatica(message):
         mensaje = formatear_ruta_para_repartidor(ruta_asignada)  # 🆕 Usa tu función segura
         
         markup = types.InlineKeyboardMarkup()
-        btn_maps = types.InlineKeyboardButton("🗺️ Abrir en Google Maps", url=ruta_asignada['google_maps_url'])
-        markup.add(btn_maps)
+markup.row(
+    types.InlineKeyboardButton("🗺️ Abrir en Maps", url=ruta_asignada['google_maps_url'])
+)
+markup.row(
+    types.InlineKeyboardButton("📦 Entregar", callback_data=f"entregar_{ruta_id}"),
+    types.InlineKeyboardButton("📊 Estatus", callback_data=f"estatus_{ruta_id}")
+)
+markup.row(
+    types.InlineKeyboardButton("🚨 Incidencia", callback_data=f"incidencia_{ruta_id}")
+)
         
         # 🆕 MANEJO SEGURO DEL ENVÍO
         try:
@@ -684,6 +692,176 @@ def manejar_foto(message):
     
     bot.reply_to(message, respuesta, parse_mode=None)
     print(f"📸 Procesamiento completado: {user} - Tipo: {tipo}")
+
+# =============================================================================
+# HANDLERS PARA BOTONES INLINE (CALLBACKS)
+# =============================================================================
+
+@bot.callback_query_handler(func=lambda call: True)
+def manejar_todos_los_callbacks(call):
+    """Manejar TODOS los clics en botones inline"""
+    try:
+        user_id = call.from_user.id
+        user_name = call.from_user.first_name
+        data = call.data
+        
+        print(f"🖱️ CALLBACK RECIBIDO: {user_name} -> {data}")
+        
+        # Procesar según el tipo de callback
+        if data.startswith('entregar_'):
+            manejar_callback_entregar(call)
+        elif data.startswith('estatus_'):
+            manejar_callback_estatus(call)
+        elif data.startswith('incidencia_'):
+            manejar_callback_incidencia(call)
+        elif data == 'cancelar':
+            bot.answer_callback_query(call.id, "❌ Acción cancelada")
+            bot.delete_message(call.message.chat.id, call.message.message_id)
+        else:
+            bot.answer_callback_query(call.id, "⚠️ Comando no reconocido")
+            
+    except Exception as e:
+        print(f"❌ Error en callback handler: {e}")
+        try:
+            bot.answer_callback_query(call.id, "❌ Error procesando comando")
+        except:
+            pass
+
+def manejar_callback_entregar(call):
+    """Manejar clic en botón 'Entregar'"""
+    try:
+        # Extraer ruta_id del callback data (ej: "entregar_5")
+        partes = call.data.split('_')
+        if len(partes) >= 2:
+            ruta_id = partes[1]
+        else:
+            ruta_id = "desconocida"
+        
+        mensaje = f"📦 **REGISTRAR ENTREGA - Ruta {ruta_id}**\n\n"
+        mensaje += "Para registrar una entrega:\n\n"
+        mensaje += "1. 📸 Toma foto del acuse firmado\n"
+        mensaje += "2. ✏️ Escribe en el pie de foto:\n"
+        mensaje += "   *ENTREGADO A [NOMBRE PERSONA]*\n\n"
+        mensaje += "**Ejemplo:**\n"
+        mensaje += "`ENTREGADO A JUAN PÉREZ LÓPEZ`\n\n"
+        mensaje += "¡El sistema detectará automáticamente la entrega!"
+        
+        # Crear teclado con opciones
+        markup = types.InlineKeyboardMarkup()
+        markup.row(
+            types.InlineKeyboardButton("📸 Subir foto ahora", callback_data=f"foto_{ruta_id}"),
+            types.InlineKeyboardButton("❌ Cancelar", callback_data="cancelar")
+        )
+        
+        bot.edit_message_text(
+            chat_id=call.message.chat.id,
+            message_id=call.message.message_id,
+            text=mensaje,
+            parse_mode='Markdown',
+            reply_markup=markup
+        )
+        
+        bot.answer_callback_query(call.id, "📦 Preparando registro de entrega...")
+        
+    except Exception as e:
+        print(f"❌ Error en entregar callback: {e}")
+        bot.answer_callback_query(call.id, "❌ Error al procesar entrega")
+
+def manejar_callback_estatus(call):
+    """Manejar clic en botón 'Estatus'"""
+    try:
+        user_id = call.from_user.id
+        
+        if user_id not in RUTAS_ASIGNADAS:
+            bot.answer_callback_query(call.id, "❌ No tienes ruta asignada")
+            return
+        
+        ruta_id = RUTAS_ASIGNADAS[user_id]
+        
+        # Buscar información de la ruta
+        for archivo in os.listdir('rutas_telegram'):
+            if f"Ruta_{ruta_id}_" in archivo:
+                with open(f'rutas_telegram/{archivo}', 'r', encoding='utf-8') as f:
+                    ruta = json.load(f)
+                
+                entregadas = len([p for p in ruta['paradas'] if p.get('estado') == 'entregado'])
+                total = len(ruta['paradas'])
+                progreso = (entregadas / total) * 100 if total > 0 else 0
+                
+                mensaje = f"📊 **ESTATUS RUTA {ruta_id}**\n\n"
+                mensaje += f"📍 **Zona:** {ruta['zona']}\n"
+                mensaje += f"✅ **Entregados:** {entregadas}/{total}\n"
+                mensaje += f"📈 **Progreso:** {progreso:.1f}%\n"
+                mensaje += f"📏 **Distancia:** {ruta['estadisticas']['distancia_km']} km\n"
+                mensaje += f"⏱️ **Tiempo estimado:** {ruta['estadisticas']['tiempo_min']} min\n\n"
+                
+                if entregadas < total:
+                    siguiente_parada = next((p for p in ruta['paradas'] if p.get('estado') != 'entregado'), None)
+                    if siguiente_parada:
+                        mensaje += f"📍 **Próxima parada:**\n"
+                        mensaje += f"👤 {siguiente_parada['nombre']}\n"
+                        mensaje += f"🏢 {siguiente_parada.get('dependencia', 'N/A')}\n"
+                        mensaje += f"📪 {siguiente_parada['direccion'][:50]}..."
+                
+                # Botones de acción
+                markup = types.InlineKeyboardMarkup()
+                markup.row(
+                    types.InlineKeyboardButton("📦 Registrar entrega", callback_data=f"entregar_{ruta_id}"),
+                    types.InlineKeyboardButton("🗺️ Ver en Maps", url=ruta['google_maps_url'])
+                )
+                markup.row(
+                    types.InlineKeyboardButton("🔄 Actualizar", callback_data="estatus_actualizar"),
+                    types.InlineKeyboardButton("❌ Cerrar", callback_data="cancelar")
+                )
+                
+                bot.edit_message_text(
+                    chat_id=call.message.chat.id,
+                    message_id=call.message.message_id,
+                    text=mensaje,
+                    parse_mode='Markdown',
+                    reply_markup=markup
+                )
+                break
+        
+        bot.answer_callback_query(call.id, "📊 Estatus actualizado")
+        
+    except Exception as e:
+        print(f"❌ Error en estatus callback: {e}")
+        bot.answer_callback_query(call.id, "❌ Error al obtener estatus")
+
+def manejar_callback_incidencia(call):
+    """Manejar clic en botón 'Incidencia'"""
+    try:
+        mensaje = "🚨 **REPORTAR INCIDENCIA**\n\n"
+        mensaje += "Selecciona el tipo de incidencia:\n\n"
+        
+        markup = types.InlineKeyboardMarkup()
+        markup.row(
+            types.InlineKeyboardButton("🚗 Tráfico", callback_data="incidencia_trafico"),
+            types.InlineKeyboardButton("🛑 Vehicular", callback_data="incidencia_vehicular")
+        )
+        markup.row(
+            types.InlineKeyboardButton("📦 Entrega", callback_data="incidencia_entrega"),
+            types.InlineKeyboardButton("👤 Personal", callback_data="incidencia_personal")
+        )
+        markup.row(
+            types.InlineKeyboardButton("📞 Contactar supervisor", callback_data="contactar_supervisor"),
+            types.InlineKeyboardButton("❌ Cancelar", callback_data="cancelar")
+        )
+        
+        bot.edit_message_text(
+            chat_id=call.message.chat.id,
+            message_id=call.message.message_id,
+            text=mensaje,
+            parse_mode='Markdown',
+            reply_markup=markup
+        )
+        
+        bot.answer_callback_query(call.id, "🚨 Preparando reporte...")
+        
+    except Exception as e:
+        print(f"❌ Error en incidencia callback: {e}")
+        bot.answer_callback_query(call.id, "❌ Error al procesar incidencia")
 
 # =============================================================================
 # ENDPOINTS FLASK PARA SINCRONIZACIÓN
