@@ -600,6 +600,14 @@ def manejar_foto(message):
     
     print(f"📸 Foto recibida de {user}: {caption}")
     
+    # 🆕 PRIMERO DEFINIR persona_entregada
+    persona_entregada = extraer_nombre_entrega(caption)
+    
+    # 🆕 LUEGO MEJORAR DETECCIÓN
+    if any(word in caption.lower() for word in ['entregado', 'entregada', 'recibido', '✅']) and persona_entregada in ["Entrega registrada", "Persona desconocida"]:
+        persona_entregada = "Entrega confirmada (nombre no detectado)"
+    
+    # CLASIFICACIÓN DE TIPO DE FOTO
     if any(word in caption.lower() for word in ['entregado', 'entregada', '✅', 'recibido']):
         tipo = 'foto_acuse'
         carpeta = 'entregas'
@@ -643,19 +651,9 @@ def manejar_foto(message):
             ruta_local=None
         )
 
-     # MEJOR DETECCIÓN DE NOMBRE (v2.0 - INDESTRUCTIBLE)
-    # Si no detecta nombre pero sí es acuse, al menos ponemos algo genérico
-    if any(word in caption.lower() for word in ['entregado', 'entregada', 'recibido', '✅']) and persona_entregada in ["Entrega registrada", "Persona desconocida"]:
-        persona_entregada = "Entrega confirmada (nombre no detectado)"
-    
+    # PROCESAR ENTREGAS
     if any(word in caption.lower() for word in ['entregado', 'entregada', '✅', 'recibido']):
         tipo = 'foto_acuse'
-        
-        palabras = caption.split()
-        for i, palabra in enumerate(palabras):
-            if palabra.lower() in ['a', 'para', 'entregado', 'entregada'] and i + 1 < len(palabras):
-                persona_entregada = " ".join(palabras[i+1:])
-                break
         
         print(f"🎯 Detectada entrega a: {persona_entregada}")
         
@@ -683,7 +681,7 @@ def manejar_foto(message):
             'ruta_id': RUTAS_ASIGNADAS.get(user_id) if user_id in RUTAS_ASIGNADAS else 'desconocido',
             'repartidor': user,
             'persona_entregada': persona_entregada,
-            'foto_local': ruta_foto_local,  # 🆕 Compatible con programa
+            'foto_local': ruta_foto_local,
             'foto_acuse': file_id,
             'timestamp': datetime.now().isoformat(),
             'user_id': user_id
