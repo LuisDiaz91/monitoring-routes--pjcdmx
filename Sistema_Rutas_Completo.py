@@ -1218,23 +1218,75 @@ class SistemaRutasGUI:
             self.log(f"Carpeta {carpeta} no existe")
 
     def mostrar_resumen(self):
+        """Muestra el resumen de rutas generadas en una ventana"""
         if os.path.exists("RESUMEN_RUTAS.xlsx"):
             try:
                 df_resumen = pd.read_excel("RESUMEN_RUTAS.xlsx")
+                
+                # Crear ventana de resumen
                 resumen_window = tk.Toplevel(self.root)
-                resumen_window.title("Resumen de Rutas")
-                tree = ttk.Treeview(resumen_window)
-                tree["columns"] = list(df_resumen.columns)
+                resumen_window.title("Resumen de Rutas Generadas")
+                resumen_window.geometry("900x500")
+                
+                # Frame principal
+                main_frame = ttk.Frame(resumen_window, padding="10")
+                main_frame.pack(fill=tk.BOTH, expand=True)
+                
+                # Título
+                ttk.Label(main_frame, text="RESUMEN DE RUTAS GENERADAS", 
+                         font=('Arial', 14, 'bold')).pack(pady=10)
+                
+                # Treeview para mostrar datos
+                tree_frame = ttk.Frame(main_frame)
+                tree_frame.pack(fill=tk.BOTH, expand=True)
+                
+                # Scrollbars
+                v_scrollbar = ttk.Scrollbar(tree_frame)
+                v_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+                
+                h_scrollbar = ttk.Scrollbar(tree_frame, orient=tk.HORIZONTAL)
+                h_scrollbar.pack(side=tk.BOTTOM, fill=tk.X)
+                
+                # Treeview
+                tree = ttk.Treeview(tree_frame, 
+                                   columns=list(df_resumen.columns),
+                                   show='headings',
+                                   yscrollcommand=v_scrollbar.set,
+                                   xscrollcommand=h_scrollbar.set)
+                
+                # Configurar columnas
                 for col in df_resumen.columns:
-                    tree.column(col, width=100)
                     tree.heading(col, text=col)
+                    tree.column(col, width=100, minwidth=80)
+                
+                # Ajustar anchos específicos
+                tree.column('Ruta', width=60)
+                tree.column('Zona', width=100)
+                tree.column('Paradas', width=70)
+                tree.column('Personas', width=70)
+                tree.column('Distancia_km', width=90)
+                tree.column('Tiempo_min', width=80)
+                tree.column('Excel', width=200)
+                tree.column('Mapa', width=200)
+                
+                # Insertar datos
                 for i, row in df_resumen.iterrows():
                     tree.insert("", tk.END, values=list(row))
+                
                 tree.pack(fill=tk.BOTH, expand=True)
+                
+                # Configurar scrollbars
+                v_scrollbar.config(command=tree.yview)
+                h_scrollbar.config(command=tree.xview)
+                
+                # Botón de cerrar
+                ttk.Button(main_frame, text="Cerrar", 
+                          command=resumen_window.destroy).pack(pady=10)
+                
             except Exception as e:
-                messagebox.showerror("Error", str(e))
+                messagebox.showerror("Error", f"No se pudo cargar el resumen:\n{str(e)}")
         else:
-            messagebox.showinfo("Resumen", "Primero genera las rutas")
+            messagebox.showinfo("Resumen", "Primero genera las rutas para ver el resumen")
 
     def refresh_sistema(self):
         if messagebox.askyesno("REFRESH", "¿Borrar todo?\n\n• Mapas\n• Excels\n• Resumen\n• Log\n• Datos Telegram\n• Fotos"):
