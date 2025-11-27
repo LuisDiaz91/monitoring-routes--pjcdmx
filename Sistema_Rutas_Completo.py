@@ -379,15 +379,45 @@ class CoreRouteGenerator:
         return None
 
     def _agrupar_ubicaciones_similares(self, filas):
-        """Agrupa personas en la misma ubicación física"""
-        grupos = []
-        coordenadas_procesadas = []
+    """Agrupa personas en la misma ubicación física de manera más inteligente"""
+    grupos = []
+    coordenadas_procesadas = []
+    
+    # Primero, normalizar todas las direcciones
+    direcciones_normalizadas = []
+    for _, fila in filas.iterrows():
+        direccion = str(fila.get('DIRECCIÓN', '')).strip()
+        if not direccion or direccion in ['nan', '']:
+            continue
+            
+        # Normalización más agresiva de direcciones
+        direccion_clean = self._normalizar_direccion(direccion)
+        direcciones_normalizadas.append((direccion_clean, fila))
+    
+    # Agrupar por dirección normalizada primero (más rápido)
+    grupos_por_direccion = {}
+    for dir_clean, fila in direcciones_normalizadas:
+        if dir_clean not in grupos_por_direccion:
+            grupos_por_direccion[dir_clean] = []
+        grupos_por_direccion[dir_clean].append(fila)
+    
+    # Luego verificar coordenadas para direcciones similares
+    for dir_clean, grupo_filas in grupos_por_direccion.items():
+        if len(grupo_filas) > 1:
+            # Si ya están agrupados por dirección, tomamos la primera para geocodificar
+            primera_fila = grupo_filas[0]
+            direccion_original = str(primera_fila.get('DIRECCIÓN', '')).strip()
+            
+            coords = self._geocode(direccion_original)
+            if coords:
+                grupos.append((coords, grupo_filas))
+                coordenadas_procesadas.append(coords)
+                self._log(f"📍 Grupo por dirección: {dir_clean[:50]}... → {len(grupo_filas)} personas")
+            continue
         
-        for _, fila in filas.iterrows():
+        # Para direcciones únicas, procesar individualmente
+        for fila in grupo_filas:
             direccion = str(fila.get('DIRECCIÓN', '')).strip()
-            if not direccion or direccion in ['nan', '']:
-                continue
-                
             coords = self._geocode(direccion)
             if not coords:
                 continue
@@ -396,33 +426,95 @@ class CoreRouteGenerator:
             agrupado = False
             for i, (coord_existente, grupo_existente) in enumerate(grupos):
                 distancia = self._calcular_distancia(coords, coord_existente)
-                # Si están a menos de 100 metros, considerar misma ubicación
-                if distancia < 0.1:  # 100 metros
+                # Si están a menos de 50 metros, considerar misma ubicación
+                if distancia < 0.05:  # 50 metros
                     grupo_existente.append(fila)
                     agrupado = True
-                    self._log(f"📍 Agrupando {fila.get('NOMBRE', '')[:20]}... con grupo existente")
+                    self._log(f"📍 Agrupando por proximidad: {fila.get('NOMBRE', '')[:20]}...")
                     break
             
             if not agrupado:
                 grupos.append((coords, [fila]))
                 coordenadas_procesadas.append(coords)
-        
-        return grupos
+    
+    self._log(f"🎯 Agrupamiento completado: {len(grupos)} ubicaciones únicas de {len(filas)} registros")
+    return grupos
 
-    def _calcular_distancia(self, coord1, coord2):
-        """Calcula distancia en kilómetros entre dos coordenadas"""
-        lat1, lon1 = coord1
-        lat2, lon2 = coord2
-        
-        # Fórmula Haversine
-        R = 6371  # Radio de la Tierra en km
-        dlat = math.radians(lat2 - lat1)
-        dlon = math.radians(lon2 - lon1)
-        a = (math.sin(dlat/2) * math.sin(dlat/2) + 
-             math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * 
-             math.sin(dlon/2) * math.sin(dlon/2))
-        c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
-        return R * c
+def _normalizar_direccion(self, direccion):
+    """Normaliza direcciones para agrupar mejor"""
+    import re
+    
+    # Convertir a minúsculas y quitar acentos
+    direccion = direccion.lower().strip()
+    
+    # Quitar caracteres especiales y múltiples espacios
+    direccion = re.sub(r'[^\w\s]', ' ', direccion)
+    direccion = re.sub(r'\s+', ' ', direccion)
+    
+    # Abreviaturas comunes
+    reemplazos = {
+        r'\bav\b': 'avenida',
+        r'\bav\.': 'avenida',
+        r'\bcto\b': 'circuito',
+        r'\bblvd\b': 'boulevard',
+        r'\bcd\b': 'ciudad',
+        r'\bcol\b': 'colonia',
+        r'\bdeleg\b': 'delegacion',
+        r'\bdf\b': 'ciudad de mexico',
+        r'\bcdmx\b': 'ciudad de mexico',
+        r'\bedif\b': 'edificio',
+        r'\bentre\b': 'y',
+        r'\besq\b': 'esquina',
+        r'\bint\b': 'interior',
+        r'\bjal\b': 'jalapa',
+        r'\blt\b': 'lote',
+        r'\bmanz\b': 'manzana',
+        r'\bmza\b': 'manzana',
+        r'\bno\b': 'numero',
+        r'\bnum\b': 'numero',
+        r'\bprlv\b': 'privada',
+        r'\bs\n': 'sin numero',
+        r'\bs/n': 'sin numero',
+        r'\bsn\b': 'sin numero',
+    }
+    
+    for patron, reemplazo in reemplazos.items():
+        direccion = re.sub(patron, reemplazo, direccion)
+    
+    # Quitar palabras comunes que no ayudan a la agrupación
+    palabras_comunes = ['ciudad de mexico', 'mexico', 'cdmx', 'alcaldia', 'delegacion']
+    for palabra in palabras_comunes:
+        direccion = direccion.replace(palabra, '')
+    
+    return direccion.strip()
+
+def _calcular_distancia(self, coord1, coord2):
+    """Calcula distancia en kilómetros entre dos coordenadas (mejorada)"""
+    from math import radians, sin, cos, sqrt, atan2
+    
+    lat1, lon1 = coord1
+    lat2, lon2 = coord2
+    
+    # Radio de la Tierra en kilómetros
+    R = 6371.0
+    
+    # Convertir grados a radianes
+    lat1_rad = radians(lat1)
+    lon1_rad = radians(lon1)
+    lat2_rad = radians(lat2)
+    lon2_rad = radians(lon2)
+    
+    # Diferencias
+    dlat = lat2_rad - lat1_rad
+    dlon = lon2_rad - lon1_rad
+    
+    # Fórmula de Haversine
+    a = sin(dlat/2)**2 + cos(lat1_rad) * cos(lat2_rad) * sin(dlon/2)**2
+    c = 2 * atan2(sqrt(a), sqrt(1-a))
+    
+    distancia = R * c
+    
+    return distancia
 
     def _optimizar_ruta(self, indices):
         filas = self.df.loc[indices]
@@ -476,50 +568,59 @@ class CoreRouteGenerator:
             return filas_agrupadas, [], 0, 0, None
 
     def _crear_ruta_archivos(self, zona, indices, ruta_id):
-        filas_opt, coords_opt, tiempo, dist, poly = self._optimizar_ruta(indices)
-        if len(filas_opt) == 0:
-            self._log(f"No valid stops for Route {ruta_id} - {zona}.")
-            return None
-            
-        os.makedirs("mapas_pro", exist_ok=True)
-        os.makedirs("rutas_excel", exist_ok=True)
+    filas_opt, coords_opt, tiempo, dist, poly = self._optimizar_ruta(indices)
+    if len(filas_opt) == 0:
+        self._log(f"No valid stops for Route {ruta_id} - {zona}.")
+        return None
         
-        # 🆕 EXCEL MEJORADO CON LINKS DE FOTOS Y AGRUPAMIENTO
-        excel_data = []
-        orden_parada = 1
+    os.makedirs("mapas_pro", exist_ok=True)
+    os.makedirs("rutas_excel", exist_ok=True)
+    
+    # EXCEL MEJORADO CON AGRUPAMIENTO INTELIGENTE
+    excel_data = []
+    orden_parada = 1
+    
+    for grupo in filas_opt:
+        coordenadas_grupo = grupo['coordenadas']
+        personas_grupo = grupo['personas']
+        cantidad_personas = grupo['cantidad_personas']
         
-        for grupo in filas_opt:
-            coordenadas_grupo = grupo['coordenadas']
-            personas_grupo = grupo['personas']
-            cantidad_personas = grupo['cantidad_personas']
+        # Para cada persona en el grupo, crear una fila en Excel
+        for i, persona in enumerate(personas_grupo):
+            # Crear link para foto
+            link_foto_base = f"fotos_entregas/Ruta_{ruta_id}_Parada_{orden_parada}"
+            if cantidad_personas > 1:
+                link_foto_base += f"_Persona_{i+1}"
             
-            # Para cada persona en el grupo, crear una fila en Excel
-            for i, persona in enumerate(personas_grupo):
-                # Crear link para foto (vulnerabilidad controlada)
-                link_foto_base = f"fotos_entregas/Ruta_{ruta_id}_Parada_{orden_parada}"
-                if cantidad_personas > 1:
-                    link_foto_base += f"_Persona_{i+1}"
-                
-                link_foto = f"=HIPERVINCULO(\"{link_foto_base}.jpg\", \"📸 VER FOTO\")"
-                
-                excel_data.append({
-                    'Orden': orden_parada,
-                    'Sub_Orden': i + 1 if cantidad_personas > 1 else '',
-                    'Nombre': str(persona.get('NOMBRE', 'N/A')).split(',')[0].strip(),
-                    'Dependencia': str(persona.get('ADSCRIPCIÓN', 'N/A')).strip(),
-                    'Dirección': str(persona.get('DIRECCIÓN', 'N/A')).strip(),
-                    'Personas_Misma_Ubicacion': cantidad_personas if i == 0 else '',
-                    'Acuse': '',
-                    'Repartidor': '',
-                    'Foto_Acuse': link_foto,
-                    'Timestamp_Entrega': '',
-                    'Estado': 'PENDIENTE',
-                    'Coordenadas': f"{coordenadas_grupo[0]},{coordenadas_grupo[1]}",
-                    'Notas': f"Grupo de {cantidad_personas} personas" if cantidad_personas > 1 and i == 0 else ''
-                })
+            link_foto = f"=HIPERVINCULO(\"{link_foto_base}.jpg\", \"📸 VER FOTO\")"
             
-            # Solo incrementar el orden principal cuando cambiamos de ubicación
-            orden_parada += 1
+            # Información de agrupamiento
+            info_grupo = ""
+            if cantidad_personas > 1:
+                if i == 0:
+                    info_grupo = f"Líder de grupo ({cantidad_personas} personas)"
+                else:
+                    info_grupo = f"Miembro {i+1} del grupo"
+            
+            excel_data.append({
+                'Orden': orden_parada,
+                'Sub_Orden': i + 1 if cantidad_personas > 1 else '',
+                'Nombre': str(persona.get('NOMBRE', 'N/A')).split(',')[0].strip(),
+                'Dependencia': str(persona.get('ADSCRIPCIÓN', 'N/A')).strip(),
+                'Dirección': str(persona.get('DIRECCIÓN', 'N/A')).strip(),
+                'Personas_Misma_Ubicacion': cantidad_personas if i == 0 else '',
+                'Tipo_Entrega': info_grupo,
+                'Acuse': '',
+                'Repartidor': '',
+                'Foto_Acuse': link_foto,
+                'Timestamp_Entrega': '',
+                'Estado': 'PENDIENTE',
+                'Coordenadas': f"{coordenadas_grupo[0]},{coordenadas_grupo[1]}",
+                'Notas': f"Grupo de {cantidad_personas} personas en misma ubicación" if cantidad_personas > 1 else ''
+            })
+        
+        # Solo incrementar el orden principal cuando cambiamos de ubicación
+        orden_parada += 1
         
         excel_df = pd.DataFrame(excel_data)
         excel_file = f"rutas_excel/Ruta_{ruta_id}_{zona}.xlsx"
