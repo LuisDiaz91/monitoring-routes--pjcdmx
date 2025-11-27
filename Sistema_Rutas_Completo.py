@@ -492,7 +492,7 @@ class CoreRouteGenerator:
             self._log(f"⚠️ Error optimizing route: {str(e)} - Usando orden original")
             return filas_agrupadas, coords_list, 45, 8, None
 
-    def _crear_ruta_archivos(self, zona, indices, ruta_id):
+def _crear_ruta_archivos(self, zona, indices, ruta_id):
     """Crea archivos de ruta - MEJORADO para manejar ubicaciones únicas"""
     # Primero agrupar las ubicaciones
     filas = self.df.loc[indices]
