@@ -730,78 +730,81 @@ class CoreRouteGenerator:
 def generate_routes(self):
     self._log("🚀 Iniciando generación de rutas...")
 
-    # 🆕 CORRECCIÓN: Crear la columna 'Zona' desde cero
-    df_clean = self.df.copy()
-    
-    # Función para extraer alcaldía
-def generate_routes(self):
-    self._log("🚀 Iniciando generación de rutas...")
-
-    # 🆕 CORRECCIÓN: Crear la columna 'Zona' desde cero
-    df_clean = self.df.copy()
-    
-    # Función para extraer alcaldía
-    def extraer_alcaldia(d):
-        d = str(d).upper()
-        alcaldias = {
-            'CUAUHTEMOC': ['CUAUHTEMOC', 'CUÁUHTEMOC', 'DOCTORES', 'CENTRO', 'JUÁREZ', 'ROMA', 'CONDESA'],
-            'MIGUEL HIDALGO': ['MIGUEL HIDALGO', 'POLANCO', 'LOMAS', 'CHAPULTEPEC'],
-            'BENITO JUAREZ': ['BENITO JUÁREZ', 'DEL VALLE', 'NÁPOLES'],
-            'ALVARO OBREGON': ['ÁLVARO OBREGÓN', 'SAN ÁNGEL', 'LAS ÁGUILAS'],
-            'COYOACAN': ['COYOACÁN', 'COYOACAN'],
-            'TLALPAN': ['TLALPAN'],
-            'IZTAPALAPA': ['IZTAPALAPA'],
-            'GUSTAVO A. MADERO': ['GUSTAVO A. MADERO'],
-            'AZCAPOTZALCO': ['AZCAPOTZALCO'],
-            'VENUSTIANO CARRANZA': ['VENUSTIANO CARRANZA'],
-            'XOCHIMILCO': ['XOCHIMILCO'],
-            'IZTACALCO': ['IZTACALCO'],
-            'MILPA ALTA': ['MILPA ALTA'],
-            'TLÁHUAC': ['TLÁHUAC']
+    try:
+        # 🆕 CORRECCIÓN: Crear la columna 'Zona' desde cero
+        df_clean = self.df.copy()
+        
+        # Función para extraer alcaldía
+        def extraer_alcaldia(d):
+            if pd.isna(d):
+                return "NO IDENTIFICADA"
+            d = str(d).upper()
+            alcaldias = {
+                'CUAUHTEMOC': ['CUAUHTEMOC', 'CUÁUHTEMOC', 'DOCTORES', 'CENTRO', 'JUÁREZ', 'ROMA', 'CONDESA'],
+                'MIGUEL HIDALGO': ['MIGUEL HIDALGO', 'POLANCO', 'LOMAS', 'CHAPULTEPEC'],
+                'BENITO JUAREZ': ['BENITO JUÁREZ', 'DEL VALLE', 'NÁPOLES'],
+                'ALVARO OBREGON': ['ÁLVARO OBREGÓN', 'SAN ÁNGEL', 'LAS ÁGUILAS'],
+                'COYOACAN': ['COYOACÁN', 'COYOACAN'],
+                'TLALPAN': ['TLALPAN'],
+                'IZTAPALAPA': ['IZTAPALAPA'],
+                'GUSTAVO A. MADERO': ['GUSTAVO A. MADERO'],
+                'AZCAPOTZALCO': ['AZCAPOTZALCO'],
+                'VENUSTIANO CARRANZA': ['VENUSTIANO CARRANZA'],
+                'XOCHIMILCO': ['XOCHIMILCO'],
+                'IZTACALCO': ['IZTACALCO'],
+                'MILPA ALTA': ['MILPA ALTA'],
+                'TLÁHUAC': ['TLÁHUAC']
+            }
+            for alc, palabras in alcaldias.items():
+                if any(p in d for p in palabras):
+                    return alc.title()
+            return "NO IDENTIFICADA"
+        
+        df_clean['Alcaldia'] = df_clean['DIRECCIÓN'].apply(extraer_alcaldia)
+        
+        ZONAS = {
+            'CENTRO': ['Cuauhtemoc', 'Venustiano Carranza', 'Miguel Hidalgo'],
+            'SUR': ['Coyoacán', 'Tlalpan', 'Álvaro Obregón', 'Benito Juárez'],
+            'ORIENTE': ['Iztacalco', 'Iztapalapa', 'Gustavo A. Madero'],
+            'SUR_ORIENTE': ['Xochimilco', 'Milpa Alta', 'Tláhuac'],
         }
-        for alc, palabras in alcaldias.items():
-            if any(p in d for p in palabras):
-                return alc.title()
-        return "NO IDENTIFICADA"
-    
-    df_clean['Alcaldia'] = df_clean['DIRECCIÓN'].apply(extraer_alcaldia)
-    
-    ZONAS = {
-        'CENTRO': ['Cuauhtemoc', 'Venustiano Carranza', 'Miguel Hidalgo'],
-        'SUR': ['Coyoacán', 'Tlalpan', 'Álvaro Obregón', 'Benito Juárez'],
-        'ORIENTE': ['Iztacalco', 'Iztapalapa', 'Gustavo A. Madero'],
-        'SUR_ORIENTE': ['Xochimilco', 'Milpa Alta', 'Tláhuac'],
-    }
-    
-    def asignar_zona(alc):
-        for zona_name, alcaldias_in_zone in ZONAS.items():
-            if alc in alcaldias_in_zone:
-                return zona_name
-        return 'OTRAS'
-    
-    df_clean['Zona'] = df_clean['Alcaldia'].apply(asignar_zona)
-    
-    # Ahora sí podemos usar la columna 'Zona'
-    zonas = df_clean['Zona'].unique()
-    ruta_id = 1
-    total = len(df_clean)
+        
+        def asignar_zona(alc):
+            for zona_name, alcaldias_in_zone in ZONAS.items():
+                if alc in alcaldias_in_zone:
+                    return zona_name
+            return 'OTRAS'
+        
+        df_clean['Zona'] = df_clean['Alcaldia'].apply(asignar_zona)
+        
+        # Ahora sí podemos usar la columna 'Zona'
+        zonas = df_clean['Zona'].unique()
+        ruta_id = 1
+        total = len(df_clean)
 
-    self._log(f"📊 Total registros: {total}")
-    self._log(f"📍 Zonas encontradas: {list(zonas)}")
+        self._log(f"📊 Total registros: {total}")
+        self._log(f"📍 Zonas encontradas: {list(zonas)}")
 
-    for zona in zonas:
-        df_zona = df_clean[df_clean['Zona'] == zona]
-        indices = df_zona.index.tolist()
+        for zona in zonas:
+            df_zona = df_clean[df_clean['Zona'] == zona]
+            indices = df_zona.index.tolist()
 
-        self._log(f"➡️ Generando ruta {ruta_id} para ZONA {zona} con {len(indices)} personas")
+            if len(indices) > 0:  # Solo procesar si hay registros
+                self._log(f"➡️ Generando ruta {ruta_id} para ZONA {zona} con {len(indices)} personas")
 
-        result = self._crear_ruta_archivos(zona, indices, ruta_id)
-        if result:
-            self.results.append(result)
-        ruta_id += 1
+                result = self._crear_ruta_archivos(zona, indices, ruta_id)
+                if result:
+                    self.results.append(result)
+                ruta_id += 1
 
-    self._log("✅ Todas las rutas generadas correctamente.")
-    return self.results
+        self._log("✅ Todas las rutas generadas correctamente.")
+        return self.results
+        
+    except Exception as e:
+        self._log(f"❌ ERROR CRÍTICO en generate_routes: {str(e)}")
+        import traceback
+        self._log(f"📋 Traceback: {traceback.format_exc()}")
+        return []
 
 
 
