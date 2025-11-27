@@ -734,6 +734,13 @@ def generate_routes(self):
     df_clean = self.df.copy()
     
     # Función para extraer alcaldía
+def generate_routes(self):
+    self._log("🚀 Iniciando generación de rutas...")
+
+    # 🆕 CORRECCIÓN: Crear la columna 'Zona' desde cero
+    df_clean = self.df.copy()
+    
+    # Función para extraer alcaldía
     def extraer_alcaldia(d):
         d = str(d).upper()
         alcaldias = {
