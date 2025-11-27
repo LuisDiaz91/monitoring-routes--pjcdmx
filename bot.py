@@ -11,6 +11,7 @@ from flask import Flask, request, jsonify, Response, send_file
 import threading
 import traceback
 from functools import wraps
+import re  # 🆕 IMPORTANTE: Para extraer nombres
 
 # =============================================================================
 # CONFIGURACIÓN INICIAL
@@ -97,7 +98,7 @@ def manejar_errores_telegram(f):
     return decorated_function
 
 # =============================================================================
-# FUNCIONES AUXILIARES
+# FUNCIONES AUXILIARES EXISTENTES (MANTENER ESTAS)
 # =============================================================================
 
 def limpiar_texto_markdown(texto):
@@ -157,86 +158,6 @@ def guardar_foto_en_bd(file_id, user_id, user_name, caption, tipo, datos_imagen=
         return True
     except Exception as e:
         print(f"❌ Error guardando foto en BD: {e}")
-        return False
-
-def actualizar_excel_desde_bot(datos_entrega):
-    """Actualiza el Excel automáticamente cuando el bot recibe entregas"""
-    try:
-        print(f"🔄 ACTUALIZANDO EXCEL: {datos_entrega.get('persona_entregada')}")
-        
-        ruta_id = datos_entrega.get('ruta_id')
-        persona_entregada = datos_entrega.get('persona_entregada')
-        foto_ruta = datos_entrega.get('foto_local', '')
-        repartidor = datos_entrega.get('repartidor', '')
-        timestamp = datos_entrega.get('timestamp', '')
-        
-        if not ruta_id or ruta_id == 'desconocido':
-            print("❌ Ruta ID desconocido, no se puede actualizar Excel")
-            return False
-        
-        # Buscar archivo de ruta
-        archivos_ruta = [f for f in os.listdir('rutas_telegram') 
-                       if f.startswith(f'Ruta_{ruta_id}_')]
-        
-        if not archivos_ruta:
-            print(f"❌ No se encontró archivo para Ruta_{ruta_id}")
-            return False
-            
-        with open(f'rutas_telegram/{archivos_ruta[0]}', 'r', encoding='utf-8') as f:
-            ruta_data = json.load(f)
-        
-        excel_file = ruta_data.get('excel_original')
-        if not excel_file or not os.path.exists(excel_file):
-            print(f"❌ Excel no encontrado: {excel_file}")
-            return False
-        
-        # Leer y actualizar Excel
-        df = pd.read_excel(excel_file)
-        persona_encontrada = False
-        
-        for idx, fila in df.iterrows():
-            nombre_celda = str(fila.get('Nombre', '')).strip().lower()
-            persona_buscar = persona_entregada.strip().lower()
-            
-            # Búsqueda flexible
-            if (persona_buscar in nombre_celda or 
-                nombre_celda in persona_buscar or
-                any(palabra in nombre_celda for palabra in persona_buscar.split())):
-                
-                link_foto = f'=HIPERVINCULO("{foto_ruta}", "📸 VER FOTO")' if foto_ruta else "SIN FOTO"
-                df.at[idx, 'Acuse'] = f"✅ ENTREGADO - {timestamp}"
-                df.at[idx, 'Repartidor'] = repartidor
-                df.at[idx, 'Foto_Acuse'] = link_foto
-                df.at[idx, 'Timestamp_Entrega'] = timestamp
-                df.at[idx, 'Estado'] = 'ENTREGADO'
-                
-                persona_encontrada = True
-                print(f"✅ Excel actualizado: {persona_entregada}")
-                break
-        
-        if not persona_encontrada:
-            print(f"⚠️ Persona no encontrada: {persona_entregada}")
-            # Agregar nueva fila
-            nueva_fila = {
-                'Orden': len(df) + 1,
-                'Nombre': persona_entregada,
-                'Dependencia': 'NO ENCONTRADO EN LISTA ORIGINAL',
-                'Dirección': 'REGISTRO AUTOMÁTICO',
-                'Acuse': f"✅ ENTREGADO - {timestamp}",
-                'Repartidor': repartidor,
-                'Foto_Acuse': f'=HIPERVINCULO("{foto_ruta}", "📸 VER FOTO")' if foto_ruta else "SIN FOTO",
-                'Timestamp_Entrega': timestamp,
-                'Estado': 'ENTREGADO'
-            }
-            df = pd.concat([df, pd.DataFrame([nueva_fila])], ignore_index=True)
-            print(f"📝 Nueva fila agregada: {persona_entregada}")
-        
-        df.to_excel(excel_file, index=False)
-        print(f"💾 Excel actualizado: {os.path.basename(excel_file)}")
-        return True
-        
-    except Exception as e:
-        print(f"❌ Error actualizando Excel: {str(e)}")
         return False
 
 def cargar_rutas_disponibles():
@@ -333,8 +254,8 @@ def registrar_avance_pendiente(datos_avance):
         print(f"❌ Error registrando avance pendiente: {e}")
         return False
 
-def registrar_entrega_sistema(user_id, user_name, persona_entregada, foto_id=None, comentarios=""):
-    """Registrar entrega en el sistema de archivos Y crear avance pendiente"""
+def registrar_entrega_sistema(user_id, user_name, persona_entregada, ruta_foto_local, comentarios=""):
+    """Registrar entrega en el sistema de archivos - COMPATIBLE CON NUEVO SISTEMA"""
     try:
         if user_id not in RUTAS_ASIGNADAS:
             return False
@@ -347,19 +268,45 @@ def registrar_entrega_sistema(user_id, user_name, persona_entregada, foto_id=Non
                 with open(f'rutas_telegram/{archivo}', 'r', encoding='utf-8') as f:
                     ruta_data = json.load(f)
                 
+                # Buscar persona en paradas
+                persona_encontrada = False
                 for parada in ruta_data['paradas']:
-                    if persona_entregada.lower() in parada['nombre'].lower():
+                    nombre_parada = parada['nombre'].upper()
+                    persona_buscar = persona_entregada.upper()
+                    
+                    # Búsqueda flexible
+                    if (persona_buscar in nombre_parada or 
+                        nombre_parada in persona_buscar or
+                        any(palabra in nombre_parada for palabra in persona_buscar.split())):
+                        
                         parada['estado'] = 'entregado'
                         parada['timestamp_entrega'] = timestamp
-                        parada['foto_acuse'] = f"fotos_acuses/{foto_id}.jpg" if foto_id else None
+                        parada['foto_acuse'] = ruta_foto_local
                         parada['comentarios'] = comentarios
+                        persona_encontrada = True
+                        print(f"✅ Persona encontrada en ruta: {parada['nombre']}")
                         break
                 
+                if not persona_encontrada:
+                    print(f"⚠️ Persona NO encontrada en ruta: {persona_entregada}")
+                    # Buscar en todas las paradas por coincidencia parcial
+                    for parada in ruta_data['paradas']:
+                        if any(palabra in parada['nombre'].upper() for palabra in persona_entregada.upper().split()):
+                            parada['estado'] = 'entregado'
+                            parada['timestamp_entrega'] = timestamp
+                            parada['foto_acuse'] = ruta_foto_local
+                            parada['comentarios'] = f"{comentarios} (coincidencia parcial)"
+                            persona_encontrada = True
+                            print(f"✅ Coincidencia parcial: {persona_entregada} → {parada['nombre']}")
+                            break
+                
+                # Verificar si la ruta está completada
                 pendientes = [p for p in ruta_data['paradas'] if p.get('estado') != 'entregado']
                 if not pendientes:
                     ruta_data['estado'] = 'completada'
                     ruta_data['timestamp_completada'] = timestamp
                 
+                # Guardar cambios
                 with open(f'rutas_telegram/{archivo}', 'w', encoding='utf-8') as f:
                     json.dump(ruta_data, f, indent=2, ensure_ascii=False)
                 
@@ -369,8 +316,8 @@ def registrar_entrega_sistema(user_id, user_name, persona_entregada, foto_id=Non
                     'repartidor': user_name,
                     'repartidor_id': user_id,
                     'persona_entregada': persona_entregada,
-                    'foto_local': foto_id,  # 🆕 Compatible con programa
-                    'foto_acuse': f"fotos_acuses/{foto_id}.jpg" if foto_id else None,
+                    'foto_local': ruta_foto_local,
+                    'foto_acuse': ruta_foto_local,
                     'timestamp': timestamp,
                     'comentarios': comentarios,
                     'tipo': 'entrega'
@@ -459,7 +406,220 @@ def set_webhook():
         return False
 
 # =============================================================================
-# HANDLERS DE TELEGRAM
+# 🚨 FUNCIONES CRÍTICAS NUEVAS PARA MANEJO DE FOTOS (AGREGAR SOLO ESTAS)
+# =============================================================================
+
+def extraer_nombre_entrega(texto):
+    """Extraer nombre de persona del texto de entrega"""
+    if not texto:
+        return "Persona no identificada"
+    
+    texto = texto.upper().strip()
+    
+    # Buscar patrones
+    patrones = [
+        "ENTREGADO A ",
+        "ENTREGADA A ", 
+        "PARA ",
+        "A ",
+        "PARA ENTREGAR A "
+    ]
+    
+    for patron in patrones:
+        if patron in texto:
+            nombre = texto.split(patron, 1)[1].strip()
+            # Limpiar nombre
+            nombre = re.sub(r'[^\w\s]', ' ', nombre)
+            nombre = ' '.join(nombre.split()[:3])  # Primeras 3 palabras
+            return nombre.title()
+    
+    # Si no encuentra patrón
+    texto_sin_entregado = texto.replace("ENTREGADO", "").replace("ENTREGADA", "").strip()
+    palabras = texto_sin_entregado.split()[:3]
+    return ' '.join(palabras).title() if palabras else "Persona no identificada"
+
+def procesar_entrega_con_foto(user_id, user_name, file_id, caption, ruta_foto_guardada):
+    """Procesar una entrega con foto - VERSIÓN QUE GUARDA EN CARPETA"""
+    try:
+        # Extraer nombre de persona
+        persona_entregada = extraer_nombre_entrega(caption)
+        
+        if user_id not in RUTAS_ASIGNADAS:
+            respuesta = (f"📸 **FOTO RECIBIDA**\n\n"
+                       f"👤 {persona_entregada}\n"
+                       f"📁 Guardada en: {ruta_foto_guardada if ruta_foto_guardada else 'No se pudo guardar'}\n"
+                       f"⚠️ No tienes ruta activa asignada")
+            bot.send_message(user_id, respuesta, parse_mode='Markdown')
+            return
+        
+        ruta_id = RUTAS_ASIGNADAS[user_id]
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
+        # Buscar y actualizar ruta
+        for archivo in os.listdir('rutas_telegram'):
+            if f"Ruta_{ruta_id}_" in archivo:
+                with open(f'rutas_telegram/{archivo}', 'r', encoding='utf-8') as f:
+                    ruta_data = json.load(f)
+                
+                # Buscar persona en paradas
+                persona_encontrada = False
+                for parada in ruta_data['paradas']:
+                    nombre_parada = parada['nombre'].upper()
+                    persona_buscar = persona_entregada.upper()
+                    
+                    # Búsqueda flexible
+                    if (persona_buscar in nombre_parada or 
+                        nombre_parada in persona_buscar or
+                        any(palabra in nombre_parada for palabra in persona_buscar.split())):
+                        
+                        parada['estado'] = 'entregado'
+                        parada['timestamp_entrega'] = timestamp
+                        parada['foto_acuse'] = ruta_foto_guardada
+                        persona_encontrada = True
+                        print(f"✅ Persona encontrada en ruta: {parada['nombre']}")
+                        break
+                
+                if not persona_encontrada:
+                    print(f"⚠️ Persona NO encontrada en ruta: {persona_entregada}")
+                    # Buscar en todas las paradas por coincidencia parcial
+                    for parada in ruta_data['paradas']:
+                        if any(palabra in parada['nombre'].upper() for palabra in persona_entregada.upper().split()):
+                            parada['estado'] = 'entregado'
+                            parada['timestamp_entrega'] = timestamp
+                            parada['foto_acuse'] = ruta_foto_guardada
+                            parada['comentarios'] = f"{caption} (coincidencia parcial)"
+                            persona_encontrada = True
+                            print(f"✅ Coincidencia parcial: {persona_entregada} → {parada['nombre']}")
+                            break
+                
+                # Guardar cambios
+                with open(f'rutas_telegram/{archivo}', 'w', encoding='utf-8') as f:
+                    json.dump(ruta_data, f, indent=2, ensure_ascii=False)
+                
+                if persona_encontrada:
+                    # Contar entregas
+                    entregadas = len([p for p in ruta_data['paradas'] if p.get('estado') == 'entregado'])
+                    total = len(ruta_data['paradas'])
+                    
+                    respuesta = (f"✅ **ENTREGA REGISTRADA**\n\n"
+                               f"👤 {persona_entregada}\n"
+                               f"📅 {timestamp}\n"
+                               f"📁 Foto: {ruta_foto_guardada if ruta_foto_guardada else 'Guardada'}\n"
+                               f"📊 Progreso: {entregadas}/{total}")
+                    
+                    # Si se completó la ruta
+                    if entregadas == total:
+                        respuesta += "\n\n🎉 **¡RUTA COMPLETADA!**"
+                        
+                else:
+                    respuesta = (f"⚠️ **ENTREGA REGISTRADA CON OBSERVACIONES**\n\n"
+                               f"👤 {persona_entregada}\n"
+                               f"📅 {timestamp}\n"
+                               f"📁 Foto: {ruta_foto_guardada if ruta_foto_guardada else 'Guardada'}\n"
+                               f"ℹ️ Persona no encontrada en lista original")
+                
+                bot.send_message(user_id, respuesta, parse_mode='Markdown')
+                print(f"✅ Entrega registrada: {persona_entregada} en Ruta {ruta_id}")
+                
+                # ACTUALIZAR EXCEL AUTOMÁTICAMENTE
+                actualizar_excel_desde_entrega(ruta_id, persona_entregada, ruta_foto_guardada, user_name, timestamp)
+                return
+        
+        bot.send_message(user_id, "❌ No se encontró la ruta asignada")
+        
+    except Exception as e:
+        print(f"❌ Error procesando entrega: {e}")
+        bot.send_message(user_id, "❌ Error al registrar entrega")
+
+def procesar_foto_reporte(user_id, user_name, file_id, caption, ruta_foto_guardada):
+    """Procesar foto de reporte/incidencia - VERSIÓN QUE GUARDA EN CARPETA"""
+    try:
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
+        respuesta = (f"📸 **REPORTE CON FOTO**\n\n"
+                   f"👤 {user_name}\n"
+                   f"📅 {timestamp}\n"
+                   f"📝 {caption if caption else 'Sin descripción'}\n"
+                   f"📁 Guardada en: {ruta_foto_guardada if ruta_foto_guardada else 'Sistema'}\n"
+                   f"✅ Reporte registrado")
+        
+        bot.send_message(user_id, respuesta, parse_mode='Markdown')
+        print(f"✅ Foto de reporte guardada: {ruta_foto_guardada}")
+        
+    except Exception as e:
+        print(f"❌ Error procesando reporte: {e}")
+
+def actualizar_excel_desde_entrega(ruta_id, persona_entregada, ruta_foto, repartidor, timestamp):
+    """Actualizar Excel automáticamente cuando se registra una entrega"""
+    try:
+        print(f"🔄 Actualizando Excel para Ruta {ruta_id}: {persona_entregada}")
+        
+        # Buscar archivo Excel de la ruta
+        archivos_excel = [f for f in os.listdir('rutas_excel') 
+                         if f"Ruta_{ruta_id}_" in f and f.endswith('.xlsx')]
+        
+        if not archivos_excel:
+            print(f"❌ No se encontró Excel para Ruta {ruta_id}")
+            return False
+        
+        excel_file = f"rutas_excel/{archivos_excel[0]}"
+        df = pd.read_excel(excel_file)
+        
+        # Buscar persona en Excel
+        persona_actualizada = False
+        for idx, fila in df.iterrows():
+            nombre_excel = str(fila.get('Nombre', '')).strip().upper()
+            persona_buscar = persona_entregada.strip().upper()
+            
+            # Búsqueda flexible
+            if (persona_buscar in nombre_excel or 
+                nombre_excel in persona_buscar or
+                any(palabra in nombre_excel for palabra in persona_buscar.split())):
+                
+                # Crear link para la foto
+                link_foto = f'=HIPERVINCULO("{ruta_foto}", "📸 VER FOTO")' if ruta_foto else "SIN FOTO"
+                
+                # Actualizar fila
+                df.at[idx, 'Acuse'] = f"✅ ENTREGADO - {timestamp}"
+                df.at[idx, 'Repartidor'] = repartidor
+                df.at[idx, 'Foto_Acuse'] = link_foto
+                df.at[idx, 'Timestamp_Entrega'] = timestamp
+                df.at[idx, 'Estado'] = 'ENTREGADO'
+                
+                persona_actualizada = True
+                print(f"✅ Excel actualizado: {persona_entregada} → {fila.get('Nombre')}")
+                break
+        
+        if persona_actualizada:
+            # Guardar Excel
+            df.to_excel(excel_file, index=False)
+            print(f"💾 Excel guardado: {excel_file}")
+            return True
+        else:
+            print(f"⚠️ Persona no encontrada en Excel: {persona_entregada}")
+            # Agregar nueva fila
+            nueva_fila = {
+                'Orden': len(df) + 1,
+                'Nombre': persona_entregada,
+                'Dependencia': 'NO ENCONTRADO EN LISTA ORIGINAL',
+                'Dirección': 'REGISTRO AUTOMÁTICO',
+                'Acuse': f"✅ ENTREGADO - {timestamp}",
+                'Repartidor': repartidor,
+                'Foto_Acuse': f'=HIPERVINCULO("{ruta_foto}", "📸 VER FOTO")' if ruta_foto else "SIN FOTO",
+                'Timestamp_Entrega': timestamp,
+                'Estado': 'ENTREGADO'
+            }
+            df = pd.concat([df, pd.DataFrame([nueva_fila])], ignore_index=True)
+            df.to_excel(excel_file, index=False)
+            print(f"📝 Nueva fila agregada en Excel: {persona_entregada}")
+            return True
+            
+    except Exception as e:
+        print(f"❌ Error actualizando Excel: {str(e)}")
+        return False
+
+# =============================================================================
+# HANDLERS DE TELEGRAM (MANTENER LOS QUE YA TIENES)
 # =============================================================================
 
 @bot.message_handler(commands=['start', 'hola'])
@@ -485,12 +645,10 @@ def enviar_bienvenida(message):
 
 ¡El sistema asigna rutas automáticamente!
         """
-        # 🆕 ENVIAR SIN MARKDOWN - SOLUCIÓN DEFINITIVA
         bot.reply_to(message, welcome_text, parse_mode=None)
         print("✅ Mensaje de bienvenida ENVIADO")
     except Exception as e:
         print(f"❌ ERROR enviando mensaje: {e}")
-        # 🆕 FALLBACK EXTREMO
         try:
             bot.reply_to(message, "🤖 Bot PJCDMX - Usa /solicitar_ruta para comenzar")
         except:
@@ -545,17 +703,15 @@ def solicitar_ruta_automatica(message):
             types.InlineKeyboardButton("🚨 Incidencia", callback_data=f"incidencia_{ruta_id}")
         )
         
-        # 🆕 MANEJO SEGURO DEL ENVÍO
         try:
             bot.reply_to(message, mensaje, parse_mode='Markdown', reply_markup=markup)
             print(f"✅ Ruta {ruta_id} asignada a {user_name}")
         except Exception as e:
             print(f"❌ Error enviando mensaje formateado: {e}")
-            # Fallback: enviar sin formato Markdown
             mensaje_simple = f"🗺️ Ruta {ruta_id} - {zona}\n{len(ruta_asignada['paradas'])} paradas\n\nAbre en Maps:"
             bot.reply_to(message, mensaje_simple, parse_mode=None, reply_markup=markup)
         
-    except Exception as e:  # ⚠️ ESTA LÍNEA ES LA QUE FALTABA
+    except Exception as e:
         error_msg = f"❌ Error asignando ruta: {str(e)}"
         print(error_msg)
         bot.reply_to(message, 
@@ -581,12 +737,11 @@ def ver_mi_ruta(message):
                 with open(f'rutas_telegram/{archivo}', 'r', encoding='utf-8') as f:
                     ruta = json.load(f)
                 
-                mensaje = formatear_ruta_para_repartidor(ruta)  # 🆕 Usa tu función segura
+                mensaje = formatear_ruta_para_repartidor(ruta)
                 markup = types.InlineKeyboardMarkup()
                 btn_maps = types.InlineKeyboardButton("🗺️ Abrir en Google Maps", url=ruta['google_maps_url'])
                 markup.add(btn_maps)
                 
-                # 🆕 MANEJO SEGURO DEL ENVÍO
                 try:
                     bot.reply_to(message, mensaje, parse_mode='Markdown', reply_markup=markup)
                 except Exception as e:
@@ -602,109 +757,89 @@ def ver_mi_ruta(message):
                 "❌ No se pudo encontrar tu ruta.",
                 parse_mode=None)
 
-@manejar_errores_telegram  
+# =============================================================================
+# 🚨 HANDLER DE FOTOS CORREGIDO (USAR SOLO ESTE)
+# =============================================================================
+
+@manejar_errores_telegram   
 @bot.message_handler(content_types=['photo'])
-def manejar_foto(message):
-    user = message.from_user.first_name
-    user_id = message.from_user.id
-    file_id = message.photo[-1].file_id
-    caption = message.caption if message.caption else "Sin descripción"
-    
-    print(f"📸 Foto recibida de {user}: {caption}")
-    
-    # 🆕 PRIMERO DEFINIR persona_entregada
-    persona_entregada = extraer_nombre_entrega(caption)
-    
-    # 🆕 LUEGO MEJORAR DETECCIÓN
-    if any(word in caption.lower() for word in ['entregado', 'entregada', 'recibido', '✅']) and persona_entregada in ["Entrega registrada", "Persona desconocida"]:
-        persona_entregada = "Entrega confirmada (nombre no detectado)"
-    
-    # CLASIFICACIÓN DE TIPO DE FOTO
-    if any(word in caption.lower() for word in ['entregado', 'entregada', '✅', 'recibido']):
-        tipo = 'foto_acuse'
-        carpeta = 'entregas'
-    elif any(word in caption.lower() for word in ['retrasado', 'problema', '⏳', '🚨']):
-        tipo = 'foto_estatus' 
-        carpeta = 'estatus'
-    elif any(word in caption.lower() for word in ['incidente', 'tráfico', 'trafico', 'accidente']):
-        tipo = 'foto_incidente'
-        carpeta = 'incidentes'
-    else:
-        tipo = 'foto_general'
-        carpeta = 'general'
-
-    print(f"🎯 CLASIFICACIÓN: '{caption}' → Carpeta: {carpeta}, Tipo: {tipo}")
-    
-    ruta_foto_local = descargar_foto_telegram(file_id, tipo_foto=carpeta)
-    
-    if ruta_foto_local:
-        with open(ruta_foto_local, 'rb') as f:
-            datos_imagen = f.read()
+def manejar_fotos(message):
+    """Manejar fotos de entregas y reportes - VERSIÓN CORREGIDA"""
+    try:
+        user_id = message.from_user.id
+        user_name = message.from_user.first_name
+        file_id = message.photo[-1].file_id
+        caption = message.caption if message.caption else ""
         
-        guardar_foto_en_bd(
-            file_id=file_id,
-            user_id=user_id,
-            user_name=user,
-            caption=caption,
-            tipo=tipo,
-            datos_imagen=datos_imagen,
-            ruta_local=ruta_foto_local
-        )
-        print(f"✅ Foto guardada en BD y carpeta: {carpeta}")
-    else:
-        print("⚠️ Error descargando foto, guardando solo referencia en BD")
-        guardar_foto_en_bd(
-            file_id=file_id,
-            user_id=user_id,
-            user_name=user,
-            caption=caption,
-            tipo=tipo,
-            datos_imagen=None,
-            ruta_local=None
-        )
-
-    # PROCESAR ENTREGAS
-    if any(word in caption.lower() for word in ['entregado', 'entregada', '✅', 'recibido']):
-        tipo = 'foto_acuse'
+        print(f"📸 Foto recibida de {user_name}: {caption}")
         
-        print(f"🎯 Detectada entrega a: {persona_entregada}")
+        # EXTRAER NOMBRE DE PERSONA PRIMERO
+        persona_entregada = extraer_nombre_entrega(caption)
         
-        if user_id in RUTAS_ASIGNADAS:
-            if registrar_entrega_sistema(user_id, user, persona_entregada, ruta_foto_local, caption):
-                respuesta = f"📦 ACUSE CON FOTO REGISTRADO ¡Gracias {user}!\n\n✅ Entrega a {persona_entregada} registrada automáticamente.\n📸 Foto guardada en el sistema."
-            else:
-                respuesta = f"📸 FOTO DE ACUSE RECIBIDA ¡Gracias {user}!\n\nPersona: {persona_entregada}\n⚠️ Error registrando en sistema"
+        # MEJORAR DETECCIÓN SI NO SE ENCONTRÓ NOMBRE
+        if any(word in caption.lower() for word in ['entregado', 'entregada', 'recibido', '✅']) and persona_entregada in ["Persona no identificada", "Entrega registrada"]:
+            persona_entregada = "Entrega confirmada (nombre no detectado)"
+        
+        # CLASIFICACIÓN DE TIPO DE FOTO
+        if any(word in caption.lower() for word in ['entregado', 'entregada', '✅', 'recibido']):
+            tipo = 'foto_acuse'
+            carpeta = 'entregas'
+        elif any(word in caption.lower() for word in ['retrasado', 'problema', '⏳', '🚨']):
+            tipo = 'foto_estatus' 
+            carpeta = 'estatus'
+        elif any(word in caption.lower() for word in ['incidente', 'tráfico', 'trafico', 'accidente']):
+            tipo = 'foto_incidente'
+            carpeta = 'incidentes'
         else:
-            respuesta = f"📸 FOTO DE ACUSE RECIBIDA ¡Gracias {user}!\n\nPersona: {persona_entregada}\nℹ️ No tienes ruta activa asignada"
+            tipo = 'foto_general'
+            carpeta = 'general'
+
+        print(f"🎯 CLASIFICACIÓN: '{caption}' → Carpeta: {carpeta}, Tipo: {tipo}")
+        
+        # DESCARGAR Y GUARDAR FOTO
+        ruta_foto_local = descargar_foto_telegram(file_id, carpeta)
+        
+        if ruta_foto_local:
+            with open(ruta_foto_local, 'rb') as f:
+                datos_imagen = f.read()
             
-    elif any(word in caption.lower() for word in ['retrasado', 'problema', '⏳', '🚨']):
-        tipo = 'foto_estatus'
-        respuesta = f"📊 ESTATUS CON FOTO ACTUALIZADO ¡Gracias {user}!\n\n📸 Foto de evidencia guardada en el sistema."
-    else:
-        tipo = 'foto_incidente'
-        respuesta = f"📸 FOTO RECIBIDA ¡Gracias {user}!\n\n📝 Descripción: {caption}\n📸 Foto guardada en el sistema."
-    
-    cursor.execute('INSERT INTO incidentes (user_id, user_name, tipo, descripcion, foto_id) VALUES (?, ?, ?, ?, ?)',
-                  (user_id, user, tipo, caption, ruta_foto_local))
-    conn.commit()
-    
-    if any(word in caption.lower() for word in ['entregado', 'entregada', '✅', 'recibido']):
-        datos_entrega_excel = {
-            'ruta_id': RUTAS_ASIGNADAS.get(user_id) if user_id in RUTAS_ASIGNADAS else 'desconocido',
-            'repartidor': user,
-            'persona_entregada': persona_entregada,
-            'foto_local': ruta_foto_local,
-            'foto_acuse': file_id,
-            'timestamp': datetime.now().isoformat(),
-            'user_id': user_id
-        }
+            guardar_foto_en_bd(
+                file_id=file_id,
+                user_id=user_id,
+                user_name=user_name,
+                caption=caption,
+                tipo=tipo,
+                datos_imagen=datos_imagen,
+                ruta_local=ruta_foto_local
+            )
+            print(f"✅ Foto guardada en BD y carpeta: {carpeta}")
+        else:
+            print("⚠️ Error descargando foto, guardando solo referencia en BD")
+            guardar_foto_en_bd(
+                file_id=file_id,
+                user_id=user_id,
+                user_name=user_name,
+                caption=caption,
+                tipo=tipo,
+                datos_imagen=None,
+                ruta_local=None
+            )
+
+        # PROCESAR SEGÚN TIPO
+        if any(word in caption.lower() for word in ['entregado', 'entregada', '✅', 'recibido']):
+            print(f"🎯 Detectada entrega a: {persona_entregada}")
+            procesar_entrega_con_foto(user_id, user_name, file_id, caption, ruta_foto_local)
+        else:
+            procesar_foto_reporte(user_id, user_name, file_id, caption, ruta_foto_local)
         
-        threading.Thread(target=actualizar_excel_desde_bot, args=(datos_entrega_excel,)).start()
+        print(f"📸 Procesamiento completado: {user_name} - Tipo: {tipo}")
         
-        print(f"🚀 Iniciando actualización automática de Excel para: {persona_entregada}")
-    
-    bot.reply_to(message, respuesta, parse_mode=None)
-    print(f"📸 Procesamiento completado: {user} - Tipo: {tipo}")
+    except Exception as e:
+        print(f"❌ Error con foto: {e}")
+        try:
+            bot.reply_to(message, "❌ Error procesando foto. Intenta nuevamente.")
+        except:
+            pass
 
 # =============================================================================
 # HANDLERS PARA BOTONES INLINE (CALLBACKS)
