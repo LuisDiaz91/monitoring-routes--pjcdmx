@@ -493,216 +493,216 @@ class CoreRouteGenerator:
             return filas_agrupadas, coords_list, 45, 8, None
 
     def _crear_ruta_archivos(self, zona, indices, ruta_id):
-        """Crea archivos de ruta - MEJORADO para manejar ubicaciones únicas"""
-        # Primero agrupar las ubicaciones
-        filas = self.df.loc[indices]
-        grupos_ubicaciones = self._agrupar_ubicaciones_similares(filas)
-        
-        if len(grupos_ubicaciones) == 0:
-            self._log(f"❌ No hay ubicaciones válidas para Ruta {ruta_id} - {zona}")
-            return None
-            
-        # 🆕 CORRECCIÓN: Permitir rutas con una sola ubicación pero múltiples personas
-        self._log(f"📍 Ruta {ruta_id}: {len(grupos_ubicaciones)} ubicaciones, {sum(len(g[1]) for g in grupos_ubicaciones)} personas")
-            
-        # Optimizar ruta (ahora maneja el caso de una sola ubicación)
-        filas_opt, coords_opt, tiempo, dist, poly = self._optimizar_ruta(grupos_ubicaciones)
-        
-        os.makedirs("mapas_pro", exist_ok=True)
-        os.makedirs("rutas_excel", exist_ok=True)
-        
-        # Crear Excel
-        excel_data = []
-        orden_parada = 1
-        
-        for grupo in filas_opt:
-            coordenadas_grupo = grupo['coordenadas']
-            personas_grupo = grupo['personas']
-            cantidad_personas = grupo['cantidad_personas']
-            
-            for i, persona in enumerate(personas_grupo):
-                link_foto_base = f"fotos_entregas/Ruta_{ruta_id}_Parada_{orden_parada}"
-                if cantidad_personas > 1:
-                    link_foto_base += f"_Persona_{i+1}"
-                
-                link_foto = f"=HIPERVINCULO(\"{link_foto_base}.jpg\", \"📸 VER FOTO\")"
-                
-                excel_data.append({
-                    'Orden': orden_parada,
-                    'Sub_Orden': i + 1 if cantidad_personas > 1 else '',
-                    'Nombre': str(persona.get('NOMBRE', 'N/A')).split(',')[0].strip(),
-                    'Dependencia': str(persona.get('ADSCRIPCIÓN', 'N/A')).strip(),
-                    'Dirección': str(persona.get('DIRECCIÓN', 'N/A')).strip(),
-                    'Personas_Misma_Ubicacion': cantidad_personas if i == 0 else '',
-                    'Acuse': '',
-                    'Repartidor': '',
-                    'Foto_Acuse': link_foto,
-                    'Timestamp_Entrega': '',
-                    'Estado': 'PENDIENTE',
-                    'Coordenadas': f"{coordenadas_grupo[0]},{coordenadas_grupo[1]}",
-                    'Notas': f"Grupo de {cantidad_personas} personas" if cantidad_personas > 1 and i == 0 else ''
-                })
-            
-            orden_parada += 1
-        
-        excel_df = pd.DataFrame(excel_data)
-        excel_file = f"rutas_excel/Ruta_{ruta_id}_{zona}.xlsx"
-        try:
-            excel_df.to_excel(excel_file, index=False)
-            self._log(f"✅ Generated Excel: {excel_file}")
-        except Exception as e:
-            self._log(f"❌ Error generating Excel: {str(e)}")
-            
-        # Crear mapa
-        map_origin_coords = list(map(float, self.origen_coords.split(',')))
-        m = folium.Map(location=map_origin_coords, zoom_start=12, tiles='CartoDB positron')
-        color = self.COLORES.get(zona, 'gray')
-        
-        # Marcador de origen
-        folium.Marker(
-            map_origin_coords,
-            popup=f"<b>{self.origen_name}</b>",
-            icon=folium.Icon(color='green', icon='balance-scale', prefix='fa')
-        ).add_to(m)
-        
-        # Ruta optimizada (solo si hay polyline)
-        if poly:
-            folium.PolyLine(polyline.decode(poly), color=color, weight=6, opacity=0.8).add_to(m)
-        
-        # Marcadores de paradas
-        for i, (grupo, coord) in enumerate(zip(filas_opt, coords_opt), 1):
-            cantidad_personas = grupo['cantidad_personas']
-            primera_persona = grupo['personas'][0]
-            nombre = str(primera_persona.get('NOMBRE', 'N/A')).split(',')[0]
-            direccion = str(primera_persona.get('DIRECCIÓN', 'N/A'))[:70]
-            
-            if cantidad_personas > 1:
-                popup_html = f"""
-                <div style='font-family:Arial; width:300px;'>
-                    <b>📍 Parada #{i} ({cantidad_personas} personas)</b><br>
-                    <b>👥 {nombre} y {cantidad_personas-1} más</b><br>
-                    <small>{direccion}...</small>
-                </div>
-                """
-                icon_color = 'orange'
-                icono = 'users'
-            else:
-                popup_html = f"""
-                <div style='font-family:Arial; width:250px;'>
-                    <b>📍 Parada #{i}</b><br>
-                    <b>👤 {nombre}</b><br>
-                    <small>{direccion}...</small>
-                </div>
-                """
-                icon_color = 'red'
-                icono = self.ICONOS.get(zona, 'circle')
-            
-            folium.Marker(
-                coord,
-                popup=popup_html,
-                tooltip=f"Parada #{i} ({cantidad_personas} pers)" if cantidad_personas > 1 else f"Parada #{i}",
-                icon=folium.Icon(color=icon_color, icon=icono, prefix='fa')
-            ).add_to(m)
-        
-        # Panel de información
-        total_personas = sum(grupo['cantidad_personas'] for grupo in filas_opt)
-        total_paradas = len(filas_opt)
-        
-        info_panel_html = f"""
-        <div style="position:fixed;top:10px;left:50px;z-index:1000;background:white;padding:15px;border-radius:10px;
-                    box-shadow:0 0 15px rgba(0,0,0,0.2);border:2px solid {color};font-family:Arial;max-width:350px;">
-            <h4 style="margin:0 0 10px;color:#2c3e50;border-bottom:2px solid {color};padding-bottom:5px;">
-                Ruta {ruta_id} - {zona}
-            </h4>
-            <small>
-                <b>📍 Paradas:</b> {total_paradas} | <b>👥 Personas:</b> {total_personas}<br>
-                <b>📏 Distancia:</b> {dist:.1f} km | <b>⏱️ Tiempo:</b> {tiempo:.0f} min<br>
-                <a href="file://{os.path.abspath(excel_file)}" target="_blank">📊 Descargar Excel</a>
-            </small>
-        </div>
-        """
-        m.get_root().html.add_child(folium.Element(info_panel_html))
-        
-        mapa_file = f"mapas_pro/Ruta_{ruta_id}_{zona}.html"
-        try:
-            m.save(mapa_file)
-            self._log(f"✅ Generated Map: {mapa_file}")
-        except Exception as e:
-            self._log(f"❌ Error generating map: {str(e)}")
-            
-        # GENERAR DATOS PARA TELEGRAM
-        waypoints_param = "|".join([f"{lat},{lng}" for lat, lng in coords_opt])
-        google_maps_url = f"https://www.google.com/maps/dir/?api=1&origin={self.origen_coords}&destination={self.origen_coords}&waypoints={waypoints_param}&travelmode=driving"
-        
-        # Preparar paradas para Telegram
-        paradas_telegram = []
-        orden_telegram = 1
-        
-        for grupo in filas_opt:
-            coordenadas_grupo = grupo['coordenadas']
-            personas_grupo = grupo['personas']
-            cantidad_personas = grupo['cantidad_personas']
-            
-            for j, persona in enumerate(personas_grupo):
-                link_foto_base = f"fotos_entregas/Ruta_{ruta_id}_Parada_{orden_telegram}"
-                if cantidad_personas > 1:
-                    link_foto_base += f"_Persona_{j+1}"
-                
-                paradas_telegram.append({
-                    'orden': orden_telegram,
-                    'sub_orden': j + 1 if cantidad_personas > 1 else 1,
-                    'nombre': str(persona.get('NOMBRE', 'N/A')).split(',')[0].strip(),
-                    'direccion': str(persona.get('DIRECCIÓN', 'N/A')).strip(),
-                    'dependencia': str(persona.get('ADSCRIPCIÓN', 'N/A')).strip(),
-                    'coords': f"{coordenadas_grupo[0]},{coordenadas_grupo[1]}",
-                    'estado': 'pendiente',
-                    'timestamp_entrega': None,
-                    'foto_acuse': link_foto_base + ".jpg",
-                    'es_grupo': cantidad_personas > 1,
-                    'total_en_grupo': cantidad_personas if j == 0 else None
-                })
-            
-            orden_telegram += 1
-        
-        ruta_telegram = {
-            'ruta_id': ruta_id,
-            'zona': zona,
-            'repartidor_asignado': None,
-            'google_maps_url': google_maps_url,
-            'paradas': paradas_telegram,
-            'estadisticas': {
-                'total_paradas': total_paradas,
-                'total_personas': total_personas,
-                'distancia_km': round(dist, 1),
-                'tiempo_min': round(tiempo),
-                'origen': self.origen_name
-            },
-            'estado': 'pendiente',
-            'fotos_acuses': [],
-            'timestamp_creacion': datetime.now().isoformat(),
-            'excel_original': excel_file,
-            'indices_originales': indices
-        }
-        
-        telegram_file = f"rutas_telegram/Ruta_{ruta_id}_{zona}.json"
-try:
-    # 🆕 CORRECCIÓN: Convertir a tipos serializables antes de guardar
-    ruta_telegram_serializable = convert_to_serializable(ruta_telegram)
+    """Crea archivos de ruta - MEJORADO para manejar ubicaciones únicas"""
+    # Primero agrupar las ubicaciones
+    filas = self.df.loc[indices]
+    grupos_ubicaciones = self._agrupar_ubicaciones_similares(filas)
     
-    with open(telegram_file, 'w', encoding='utf-8') as f:
-        json.dump(ruta_telegram_serializable, f, indent=2, ensure_ascii=False)
-    self._log(f"📱 Datos para Telegram generados: {telegram_file}")
-except Exception as e:
-    self._log(f"❌ Error guardando datos Telegram: {str(e)}")
+    if len(grupos_ubicaciones) == 0:
+        self._log(f"❌ No hay ubicaciones válidas para Ruta {ruta_id} - {zona}")
+        return None
         
-        # ENVIAR RUTA AL BOT EN RAILWAY
-        try:
+    # 🆕 CORRECCIÓN: Permitir rutas con una sola ubicación pero múltiples personas
+    self._log(f"📍 Ruta {ruta_id}: {len(grupos_ubicaciones)} ubicaciones, {sum(len(g[1]) for g in grupos_ubicaciones)} personas")
+        
+    # Optimizar ruta (ahora maneja el caso de una sola ubicación)
+    filas_opt, coords_opt, tiempo, dist, poly = self._optimizar_ruta(grupos_ubicaciones)
+    
+    os.makedirs("mapas_pro", exist_ok=True)
+    os.makedirs("rutas_excel", exist_ok=True)
+    
+    # Crear Excel
+    excel_data = []
+    orden_parada = 1
+    
+    for grupo in filas_opt:
+        coordenadas_grupo = grupo['coordenadas']
+        personas_grupo = grupo['personas']
+        cantidad_personas = grupo['cantidad_personas']
+        
+        for i, persona in enumerate(personas_grupo):
+            link_foto_base = f"fotos_entregas/Ruta_{ruta_id}_Parada_{orden_parada}"
+            if cantidad_personas > 1:
+                link_foto_base += f"_Persona_{i+1}"
+            
+            link_foto = f"=HIPERVINCULO(\"{link_foto_base}.jpg\", \"📸 VER FOTO\")"
+            
+            excel_data.append({
+                'Orden': orden_parada,
+                'Sub_Orden': i + 1 if cantidad_personas > 1 else '',
+                'Nombre': str(persona.get('NOMBRE', 'N/A')).split(',')[0].strip(),
+                'Dependencia': str(persona.get('ADSCRIPCIÓN', 'N/A')).strip(),
+                'Dirección': str(persona.get('DIRECCIÓN', 'N/A')).strip(),
+                'Personas_Misma_Ubicacion': cantidad_personas if i == 0 else '',
+                'Acuse': '',
+                'Repartidor': '',
+                'Foto_Acuse': link_foto,
+                'Timestamp_Entrega': '',
+                'Estado': 'PENDIENTE',
+                'Coordenadas': f"{coordenadas_grupo[0]},{coordenadas_grupo[1]}",
+                'Notas': f"Grupo de {cantidad_personas} personas" if cantidad_personas > 1 and i == 0 else ''
+            })
+        
+        orden_parada += 1
+    
+    excel_df = pd.DataFrame(excel_data)
+    excel_file = f"rutas_excel/Ruta_{ruta_id}_{zona}.xlsx"
+    try:
+        excel_df.to_excel(excel_file, index=False)
+        self._log(f"✅ Generated Excel: {excel_file}")
+    except Exception as e:
+        self._log(f"❌ Error generating Excel: {str(e)}")
+        
+    # Crear mapa
+    map_origin_coords = list(map(float, self.origen_coords.split(',')))
+    m = folium.Map(location=map_origin_coords, zoom_start=12, tiles='CartoDB positron')
+    color = self.COLORES.get(zona, 'gray')
+    
+    # Marcador de origen
+    folium.Marker(
+        map_origin_coords,
+        popup=f"<b>{self.origen_name}</b>",
+        icon=folium.Icon(color='green', icon='balance-scale', prefix='fa')
+    ).add_to(m)
+    
+    # Ruta optimizada (solo si hay polyline)
+    if poly:
+        folium.PolyLine(polyline.decode(poly), color=color, weight=6, opacity=0.8).add_to(m)
+    
+    # Marcadores de paradas
+    for i, (grupo, coord) in enumerate(zip(filas_opt, coords_opt), 1):
+        cantidad_personas = grupo['cantidad_personas']
+        primera_persona = grupo['personas'][0]
+        nombre = str(primera_persona.get('NOMBRE', 'N/A')).split(',')[0]
+        direccion = str(primera_persona.get('DIRECCIÓN', 'N/A'))[:70]
+        
+        if cantidad_personas > 1:
+            popup_html = f"""
+            <div style='font-family:Arial; width:300px;'>
+                <b>📍 Parada #{i} ({cantidad_personas} personas)</b><br>
+                <b>👥 {nombre} y {cantidad_personas-1} más</b><br>
+                <small>{direccion}...</small>
+            </div>
+            """
+            icon_color = 'orange'
+            icono = 'users'
+        else:
+            popup_html = f"""
+            <div style='font-family:Arial; width:250px;'>
+                <b>📍 Parada #{i}</b><br>
+                <b>👤 {nombre}</b><br>
+                <small>{direccion}...</small>
+            </div>
+            """
+            icon_color = 'red'
+            icono = self.ICONOS.get(zona, 'circle')
+        
+        folium.Marker(
+            coord,
+            popup=popup_html,
+            tooltip=f"Parada #{i} ({cantidad_personas} pers)" if cantidad_personas > 1 else f"Parada #{i}",
+            icon=folium.Icon(color=icon_color, icon=icono, prefix='fa')
+        ).add_to(m)
+    
+    # Panel de información
+    total_personas = sum(grupo['cantidad_personas'] for grupo in filas_opt)
+    total_paradas = len(filas_opt)
+    
+    info_panel_html = f"""
+    <div style="position:fixed;top:10px;left:50px;z-index:1000;background:white;padding:15px;border-radius:10px;
+                box-shadow:0 0 15px rgba(0,0,0,0.2);border:2px solid {color};font-family:Arial;max-width:350px;">
+        <h4 style="margin:0 0 10px;color:#2c3e50;border-bottom:2px solid {color};padding-bottom:5px;">
+            Ruta {ruta_id} - {zona}
+        </h4>
+        <small>
+            <b>📍 Paradas:</b> {total_paradas} | <b>👥 Personas:</b> {total_personas}<br>
+            <b>📏 Distancia:</b> {dist:.1f} km | <b>⏱️ Tiempo:</b> {tiempo:.0f} min<br>
+            <a href="file://{os.path.abspath(excel_file)}" target="_blank">📊 Descargar Excel</a>
+        </small>
+    </div>
+    """
+    m.get_root().html.add_child(folium.Element(info_panel_html))
+    
+    mapa_file = f"mapas_pro/Ruta_{ruta_id}_{zona}.html"
+    try:
+        m.save(mapa_file)
+        self._log(f"✅ Generated Map: {mapa_file}")
+    except Exception as e:
+        self._log(f"❌ Error generating map: {str(e)}")
+        
+    # GENERAR DATOS PARA TELEGRAM
+    waypoints_param = "|".join([f"{lat},{lng}" for lat, lng in coords_opt])
+    google_maps_url = f"https://www.google.com/maps/dir/?api=1&origin={self.origen_coords}&destination={self.origen_coords}&waypoints={waypoints_param}&travelmode=driving"
+    
+    # Preparar paradas para Telegram
+    paradas_telegram = []
+    orden_telegram = 1
+    
+    for grupo in filas_opt:
+        coordenadas_grupo = grupo['coordenadas']
+        personas_grupo = grupo['personas']
+        cantidad_personas = grupo['cantidad_personas']
+        
+        for j, persona in enumerate(personas_grupo):
+            link_foto_base = f"fotos_entregas/Ruta_{ruta_id}_Parada_{orden_telegram}"
+            if cantidad_personas > 1:
+                link_foto_base += f"_Persona_{j+1}"
+            
+            paradas_telegram.append({
+                'orden': orden_telegram,
+                'sub_orden': j + 1 if cantidad_personas > 1 else 1,
+                'nombre': str(persona.get('NOMBRE', 'N/A')).split(',')[0].strip(),
+                'direccion': str(persona.get('DIRECCIÓN', 'N/A')).strip(),
+                'dependencia': str(persona.get('ADSCRIPCIÓN', 'N/A')).strip(),
+                'coords': f"{coordenadas_grupo[0]},{coordenadas_grupo[1]}",
+                'estado': 'pendiente',
+                'timestamp_entrega': None,
+                'foto_acuse': link_foto_base + ".jpg",
+                'es_grupo': cantidad_personas > 1,
+                'total_en_grupo': cantidad_personas if j == 0 else None
+            })
+        
+        orden_telegram += 1
+    
+    ruta_telegram = {
+        'ruta_id': ruta_id,
+        'zona': zona,
+        'repartidor_asignado': None,
+        'google_maps_url': google_maps_url,
+        'paradas': paradas_telegram,
+        'estadisticas': {
+            'total_paradas': total_paradas,
+            'total_personas': total_personas,
+            'distancia_km': round(dist, 1),
+            'tiempo_min': round(tiempo),
+            'origen': self.origen_name
+        },
+        'estado': 'pendiente',
+        'fotos_acuses': [],
+        'timestamp_creacion': datetime.now().isoformat(),
+        'excel_original': excel_file,
+        'indices_originales': indices
+    }
+    
+    telegram_file = f"rutas_telegram/Ruta_{ruta_id}_{zona}.json"
+    try:
+        # 🆕 CORRECCIÓN: Convertir a tipos serializables antes de guardar
+        ruta_telegram_serializable = convert_to_serializable(ruta_telegram)
+        
+        with open(telegram_file, 'w', encoding='utf-8') as f:
+            json.dump(ruta_telegram_serializable, f, indent=2, ensure_ascii=False)
+        self._log(f"📱 Datos para Telegram generados: {telegram_file}")
+    except Exception as e:
+        self._log(f"❌ Error guardando datos Telegram: {str(e)}")
+    
+    # ENVIAR RUTA AL BOT EN RAILWAY
+    try:
         RAILWAY_URL = "https://monitoring-routes-pjcdmx-production.up.railway.app"
         conexion = ConexionBotRailway(RAILWAY_URL)
         
         if conexion.verificar_conexion():
-            # 🆕 CORRECCIÓN IMPORTANTE: Usar la versión serializable también para el envío
-            if conexion.enviar_ruta_bot(ruta_telegram_serializable):  # ← Aquí el cambio clave
+            # 🆕 CORRECCIÓN: Usar la versión serializable también para el envío
+            if conexion.enviar_ruta_bot(ruta_telegram_serializable):
                 self._log(f"📱 Ruta {ruta_id} enviada al bot exitosamente")
             else:
                 self._log("⚠️ Ruta generada pero no se pudo enviar al bot")
