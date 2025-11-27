@@ -724,10 +724,10 @@ class CoreRouteGenerator:
             'mapa': mapa_file,
             'telegram_data': ruta_telegram,
             'telegram_file': telegram_file
-        }
+               }
 
     # MÉTODO generate_routes DENTRO DE LA CLASE
-    def generate_routes(self):
+def generate_routes(self):
     self._log("🚀 Iniciando generación de rutas...")
 
     # 🆕 CORRECCIÓN: Crear la columna 'Zona' desde cero
@@ -797,7 +797,7 @@ class CoreRouteGenerator:
     return self.results
 
 
-# =============================================================================
+
 # CLASE INTERFAZ GRÁFICA (SistemaRutasGUI) - VERSIÓN FINAL
 # =============================================================================
 class SistemaRutasGUI:
