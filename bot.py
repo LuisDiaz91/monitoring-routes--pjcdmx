@@ -519,19 +519,19 @@ def solicitar_ruta_automatica(message):
             json.dump(ruta_asignada, f, indent=2, ensure_ascii=False)
         
         RUTAS_ASIGNADAS[user_id] = ruta_id
-        mensaje = formatear_ruta_para_repartidor(ruta_asignada)  # 🆕 Usa tu función segura
+        mensaje = formatear_ruta_para_repartidor(ruta_asignada)
         
         markup = types.InlineKeyboardMarkup()
-markup.row(
-    types.InlineKeyboardButton("🗺️ Abrir en Maps", url=ruta_asignada['google_maps_url'])
-)
-markup.row(
-    types.InlineKeyboardButton("📦 Entregar", callback_data=f"entregar_{ruta_id}"),
-    types.InlineKeyboardButton("📊 Estatus", callback_data=f"estatus_{ruta_id}")
-)
-markup.row(
-    types.InlineKeyboardButton("🚨 Incidencia", callback_data=f"incidencia_{ruta_id}")
-)
+        markup.row(
+            types.InlineKeyboardButton("🗺️ Abrir en Maps", url=ruta_asignada['google_maps_url'])
+        )
+        markup.row(
+            types.InlineKeyboardButton("📦 Entregar", callback_data=f"entregar_{ruta_id}"),
+            types.InlineKeyboardButton("📊 Estatus", callback_data=f"estatus_{ruta_id}")
+        )
+        markup.row(
+            types.InlineKeyboardButton("🚨 Incidencia", callback_data=f"incidencia_{ruta_id}")
+        )
         
         # 🆕 MANEJO SEGURO DEL ENVÍO
         try:
@@ -543,7 +543,7 @@ markup.row(
             mensaje_simple = f"🗺️ Ruta {ruta_id} - {zona}\n{len(ruta_asignada['paradas'])} paradas\n\nAbre en Maps:"
             bot.reply_to(message, mensaje_simple, parse_mode=None, reply_markup=markup)
         
-    except Exception as e:
+    except Exception as e:  # ⚠️ ESTA LÍNEA ES LA QUE FALTABA
         error_msg = f"❌ Error asignando ruta: {str(e)}"
         print(error_msg)
         bot.reply_to(message, 
@@ -643,7 +643,10 @@ def manejar_foto(message):
             ruta_local=None
         )
 
-    persona_entregada = "Por determinar"
+     # MEJOR DETECCIÓN DE NOMBRE (v2.0 - INDESTRUCTIBLE)
+    # Si no detecta nombre pero sí es acuse, al menos ponemos algo genérico
+    if any(word in caption.lower() for word in ['entregado', 'entregada', 'recibido', '✅']) and persona_entregada in ["Entrega registrada", "Persona desconocida"]:
+        persona_entregada = "Entrega confirmada (nombre no detectado)"
     
     if any(word in caption.lower() for word in ['entregado', 'entregada', '✅', 'recibido']):
         tipo = 'foto_acuse'
@@ -1022,6 +1025,88 @@ def index():
 print("\n🎯 SISTEMA AUTOMÁTICO DE RUTAS PJCDMX - 100% OPERATIVO")
 print("📱 Comandos: /solicitar_ruta, /miruta, /entregar")
 print("🔄 Sistema de avances pendientes: ACTIVADO")
+
+# =============================================================================
+# AJUSTES CRÍTICOS QUE TE SALVAN LA VIDA (AÑADE ESTO AL FINAL DEL CÓDIGO)
+# =============================================================================
+
+# 1. FORZAR RECARGA DE RUTAS CADA 30 SEGUNDOS (evita rutas "fantasma")
+def auto_recargar_rutas():
+    while True:
+        time.sleep(30)
+        try:
+            cargar_rutas_disponibles()
+            # print(f"Rutas recargadas automáticamente: {len(RUTAS_DISPONIBLES)} disponibles")
+        except:
+            pass
+
+threading.Thread(target=auto_recargar_rutas, daemon=True).start()
+
+# 2. LIMPIAR AVANCES PENDIENTES CADA 10 MINUTOS (evita acumulación infinita)
+def limpiar_avances_antiguos():
+    while True:
+        time.sleep(600)  # 10 minutos
+        try:
+            if os.path.exists('avances_ruta'):
+                ahora = time.time()
+                for archivo in os.listdir('avances_ruta'):
+                    ruta = f'avances_ruta/{archivo}'
+                    if os.path.getmtime(ruta) < ahora - 86400:  # más de 24h
+                        try:
+                            os.remove(ruta)
+                            print(f"Limpieza: eliminado avance viejo {archivo}")
+                        except:
+                            pass
+        except:
+            pass
+
+threading.Thread(target=limpiar_avances_antiguos, daemon=True).start()
+
+# 3. REINTENTOS AUTOMÁTICOS PARA WEBHOOK (Railway a veces falla al inicio)
+if os.environ.get('RAILWAY_ENVIRONMENT'):
+    def reintentar_webhook():
+        time.sleep(10)
+        if not bot.get_webhook_info().url:
+            print("Webhook perdido! Reintentando...")
+            set_webhook()
+    threading.Thread(target=reintentar_webhook, daemon=True).start()
+
+# 4. ENDPOINT PARA QUE TU PROGRAMA DE ESCRITORIO LIMPIE TODO (botón "LIMPIAR TODO")
+@app.route('/api/limpiar_todo', methods=['POST'])
+def limpiar_todo():
+    try:
+        import shutil
+        carpetas = ['avances_ruta', 'avances_procesados', 'carpeta_fotos_central']
+        for c in carpetas:
+            if os.path.exists(c):
+                shutil.rmtree(c)
+                os.makedirs(c, exist_ok=True)
+        RUTAS_ASIGNADAS.clear()
+        AVANCES_PENDIENTES.clear()
+        cargar_rutas_disponibles()
+        return jsonify({"status": "success", "message": "¡Sistema limpio como nuevo!"}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# 5. MEJORAR DETECCIÓN DE ENTREGA EN FOTOS (más inteligente)
+def extraer_nombre_entrega(caption):
+    if not caption:
+        return "Persona desconocida"
+    texto = caption.lower()
+    marcadores = ['a ', 'para ', 'entregado a ', 'entregué a ', 'recibió ', 'firmó ']
+    for m in marcadores:
+        if m in texto:
+            inicio = texto.find(m) + len(m)
+            resto = caption[inicio:].strip()
+            # Tomar hasta la primera coma o punto
+            nombre = resto.split(',')[0].split('.')[0].strip()
+            return nombre.title() if nombre else "Persona detectada"
+    return "Entrega registrada"
+
+# REEMPLAZA esta parte del handler de fotos:
+# persona_entregada = "Por determinar"
+# por esto:
+persona_entregada = extraer_nombre_entrega(caption)
 
 inicializar_sistema_completo()
 
