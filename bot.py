@@ -240,7 +240,6 @@ def actualizar_excel_desde_bot(datos_entrega):
         return False
 
 def cargar_rutas_disponibles():
-    """Cargar rutas disponibles para asignación automática"""
     global RUTAS_DISPONIBLES
     RUTAS_DISPONIBLES = []
     
@@ -250,12 +249,25 @@ def cargar_rutas_disponibles():
                 try:
                     with open(f'rutas_telegram/{archivo}', 'r', encoding='utf-8') as f:
                         ruta = json.load(f)
-                        if ruta.get('estado') == 'pendiente':
-                            RUTAS_DISPONIBLES.append(ruta)
+                    
+                    # 🆕 FILTRO: Solo rutas de HOY
+                    fecha_creacion = ruta.get('timestamp_creacion', '')
+                    if fecha_creacion:
+                        fecha_obj = datetime.fromisoformat(fecha_creacion.replace('Z', '+00:00'))
+                        hoy = datetime.now()
+                        
+                        # Solo rutas creadas hoy
+                        if fecha_obj.date() == hoy.date():
+                            if ruta.get('estado') == 'pendiente':
+                                RUTAS_DISPONIBLES.append(ruta)
+                    else:
+                        # Si no tiene fecha, asumir que es vieja y no incluirla
+                        pass
+                        
                 except Exception as e:
                     print(f"❌ Error cargando ruta {archivo}: {e}")
     
-    print(f"🔄 Rutas disponibles cargadas: {len(RUTAS_DISPONIBLES)}")
+    print(f"🔄 Rutas de HOY cargadas: {len(RUTAS_DISPONIBLES)}")
     return len(RUTAS_DISPONIBLES)
 
 def formatear_ruta_para_repartidor(ruta):
