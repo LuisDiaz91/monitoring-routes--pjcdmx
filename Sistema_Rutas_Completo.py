@@ -730,8 +730,7 @@ class CoreRouteGenerator:
     def generate_routes(self):
     self._log("🚀 Iniciando generación de rutas...")
 
-    # 🆕 CORRECCIÓN: Usar la columna 'Zona' que se crea en el proceso, no 'ZONA'
-    # Primero necesitamos procesar los datos para crear la columna Zona
+    # 🆕 CORRECCIÓN: Crear la columna 'Zona' desde cero
     df_clean = self.df.copy()
     
     # Función para extraer alcaldía
@@ -796,7 +795,6 @@ class CoreRouteGenerator:
 
     self._log("✅ Todas las rutas generadas correctamente.")
     return self.results
-
 
 
 # =============================================================================
