@@ -904,53 +904,47 @@ def manejar_fotos(message):
 # HANDLERS PARA BOTONES INLINE (CALLBACKS)
 # =============================================================================
 
-@bot.callback_query_handler(func=lambda call: True)
-def manejar_todos_los_callbacks(call):
-    """Manejar TODOS los clics en botones inline"""
+def manejar_callback_foto_entrega(call):
+    """Manejar clic en botón 'Subir foto ahora' para entrega"""
     try:
-        user_id = call.from_user.id
-        user_name = call.from_user.first_name
-        data = call.data
-        
-        print(f"🖱️ CALLBACK RECIBIDO: {user_name} -> {data}")
-        
-        # Procesar según el tipo de callback
-        if data.startswith('entregar_'):
-            manejar_callback_entregar(call)
-        elif data.startswith('estatus_'):
-            manejar_callback_estatus(call)
-        elif data.startswith('incidencia_'):
-            manejar_callback_incidencia(call)
-        elif data.startswith('lista_completa_'): 
-            manejar_callback_lista_completa(call)
-        elif data.startswith('volver_resumen_'): 
-            manejar_callback_volver_resumen(call)
-        # 🆕 NUEVOS HANDLERS SIMPLES PARA INCIDENCIAS
-        elif data == 'incidencia_trafico':
-            manejar_callback_incidencia_trafico(call)
-        elif data == 'incidencia_vehicular':
-            manejar_callback_incidencia_vehicular(call)
-        elif data == 'incidencia_entrega':
-            manejar_callback_incidencia_entrega(call)
-        elif data == 'incidencia_personal':
-            manejar_callback_incidencia_personal(call)
-        elif data == 'contactar_supervisor':
-            manejar_callback_contactar_supervisor(call)
-        elif data == 'cancelar':
-            bot.answer_callback_query(call.id, "❌ Acción cancelada")
-            bot.delete_message(call.message.chat.id, call.message.message_id)
+        # Extraer ruta_id del callback data (ej: "foto_5")
+        partes = call.data.split('_')
+        if len(partes) >= 2:
+            ruta_id = partes[1]
         else:
-            bot.answer_callback_query(call.id, "⚠️ Comando no reconocido")
-            
+            ruta_id = "desconocida"
+        
+        mensaje = f"📸 **SUBIR FOTO DE ENTREGA - Ruta {ruta_id}**\n\n"
+        mensaje += "Por favor toma una foto del acuse firmado y escribe en el pie de foto:\n\n"
+        mensaje += "`ENTREGADO A [NOMBRE COMPLETO]`\n\n"
+        mensaje += "**Ejemplos:**\n"
+        mensaje += "• `ENTREGADO A JUAN PÉREZ LÓPEZ`\n"
+        mensaje += "• `ENTREGADO A MARÍA GARCÍA`\n"
+        mensaje += "• `PARA CARLOS RODRÍGUEZ`\n\n"
+        mensaje += "⚠️ **IMPORTANTE:** El texto debe incluir 'ENTREGADO A' o 'PARA' seguido del nombre."
+
+        # Crear teclado con opción de cancelar
+        markup = types.InlineKeyboardMarkup()
+        markup.row(
+            types.InlineKeyboardButton("❌ Cancelar", callback_data="cancelar")
+        )
+        
+        bot.edit_message_text(
+            chat_id=call.message.chat.id,
+            message_id=call.message.message_id,
+            text=mensaje,
+            parse_mode='Markdown',
+            reply_markup=markup
+        )
+        
+        bot.answer_callback_query(call.id, "📸 Listo para recibir foto...")
+        
     except Exception as e:
-        print(f"❌ Error en callback handler: {e}")
-        try:
-            bot.answer_callback_query(call.id, "❌ Error procesando comando")
-        except:
-            pass
-            
+        print(f"❌ Error en foto entrega callback: {e}")
+        bot.answer_callback_query(call.id, "❌ Error al preparar foto")
+
 def manejar_callback_entregar(call):
-    """Manejar clic en botón 'Entregar'"""
+    """Manejar clic en botón 'Entregar' - VERSIÓN MEJORADA"""
     try:
         # Extraer ruta_id del callback data (ej: "entregar_5")
         partes = call.data.split('_')
@@ -960,18 +954,29 @@ def manejar_callback_entregar(call):
             ruta_id = "desconocida"
         
         mensaje = f"📦 **REGISTRAR ENTREGA - Ruta {ruta_id}**\n\n"
-        mensaje += "Para registrar una entrega:\n\n"
-        mensaje += "1. 📸 Toma foto del acuse firmado\n"
-        mensaje += "2. ✏️ Escribe en el pie de foto:\n"
-        mensaje += "   *ENTREGADO A [NOMBRE PERSONA]*\n\n"
-        mensaje += "**Ejemplo:**\n"
-        mensaje += "`ENTREGADO A JUAN PÉREZ LÓPEZ`\n\n"
-        mensaje += "¡El sistema detectará automáticamente la entrega!"
+        mensaje += "**OPCIÓN 1 - FOTO RÁPIDA:**\n"
+        mensaje += "• Usa el botón '📸 Subir foto ahora'\n"
+        mensaje += "• Toma foto del acuse firmado\n"
+        mensaje += "• Escribe: `ENTREGADO A [NOMBRE]` en el pie de foto\n\n"
         
-        # Crear teclado con opciones
+        mensaje += "**OPCIÓN 2 - MANUAL:**\n"  
+        mensaje += "• Simplemente envía una foto normal\n"
+        mensaje += "• Escribe el texto de entrega en el pie de foto\n"
+        mensaje += "• El sistema detectará automáticamente\n\n"
+        
+        mensaje += "**📝 FORMATOS ACEPTADOS:**\n"
+        mensaje += "• `ENTREGADO A JUAN PÉREZ`\n"
+        mensaje += "• `ENTREGADA A MARÍA GARCÍA`\n" 
+        mensaje += "• `PARA CARLOS RODRÍGUEZ`\n"
+        mensaje += "• `ACUSE DE JUANA LÓPEZ`\n"
+
+        # Crear teclado con opciones MEJORADO
         markup = types.InlineKeyboardMarkup()
         markup.row(
             types.InlineKeyboardButton("📸 Subir foto ahora", callback_data=f"foto_{ruta_id}"),
+        )
+        markup.row(
+            types.InlineKeyboardButton("🗺️ Volver a la ruta", callback_data=f"volver_resumen_{ruta_id}"),
             types.InlineKeyboardButton("❌ Cancelar", callback_data="cancelar")
         )
         
@@ -1258,6 +1263,90 @@ def manejar_callback_contactar_supervisor(call):
     except Exception as e:
         print(f"❌ Error en contacto supervisor: {e}")
         bot.answer_callback_query(call.id, "❌ Error al contactar")
+
+@bot.callback_query_handler(func=lambda call: True)
+def manejar_todos_los_callbacks(call):
+    """Manejar TODOS los clics en botones inline"""
+    try:
+        user_id = call.from_user.id
+        user_name = call.from_user.first_name
+        data = call.data
+        
+        print(f"🖱️ CALLBACK RECIBIDO: {user_name} -> {data}")
+        
+        # Procesar según el tipo de callback
+        if data.startswith('entregar_'):
+            manejar_callback_entregar(call)
+        elif data.startswith('estatus_'):
+            manejar_callback_estatus(call)
+        elif data.startswith('incidencia_'):
+            manejar_callback_incidencia(call)
+        elif data.startswith('lista_completa_'): 
+            manejar_callback_lista_completa(call)
+        elif data.startswith('volver_resumen_'): 
+            manejar_callback_volver_resumen(call)
+        # 🆕 NUEVO: Handler para botón "Subir foto ahora"
+        elif data.startswith('foto_'):
+            manejar_callback_foto_entrega(call)
+        elif data == 'incidencia_trafico':
+            manejar_callback_incidencia_trafico(call)
+        elif data == 'incidencia_vehicular':
+            manejar_callback_incidencia_vehicular(call)
+        elif data == 'incidencia_entrega':
+            manejar_callback_incidencia_entrega(call)
+        elif data == 'incidencia_personal':
+            manejar_callback_incidencia_personal(call)
+        elif data == 'contactar_supervisor':
+            manejar_callback_contactar_supervisor(call)
+        elif data == 'cancelar':
+            bot.answer_callback_query(call.id, "❌ Acción cancelada")
+            # 🆕 MEJORA: No eliminar el mensaje, volver a la ruta
+            try:
+                user_id = call.from_user.id
+                if user_id in RUTAS_ASIGNADAS:
+                    ruta_id = RUTAS_ASIGNADAS[user_id]
+                    # Buscar y mostrar la ruta nuevamente
+                    for archivo in os.listdir('rutas_telegram'):
+                        if f"Ruta_{ruta_id}_" in archivo:
+                            with open(f'rutas_telegram/{archivo}', 'r', encoding='utf-8') as f:
+                                ruta = json.load(f)
+                            
+                            mensaje = formatear_ruta_para_repartidor(ruta)
+                            markup = types.InlineKeyboardMarkup()
+                            markup.row(
+                                types.InlineKeyboardButton("🗺️ Abrir en Maps", url=ruta['google_maps_url']),
+                                types.InlineKeyboardButton("👥 Ver Lista Completa", callback_data=f"lista_completa_{ruta_id}")
+                            )
+                            markup.row(
+                                types.InlineKeyboardButton("📦 Entregar", callback_data=f"entregar_{ruta_id}"),
+                                types.InlineKeyboardButton("📊 Estatus", callback_data=f"estatus_{ruta_id}")
+                            )
+                            markup.row(
+                                types.InlineKeyboardButton("🚨 Incidencia", callback_data=f"incidencia_{ruta_id}")
+                            )
+                            
+                            bot.edit_message_text(
+                                chat_id=call.message.chat.id,
+                                message_id=call.message.message_id,
+                                text=mensaje,
+                                parse_mode='Markdown',
+                                reply_markup=markup
+                            )
+                            break
+                else:
+                    bot.delete_message(call.message.chat.id, call.message.message_id)
+            except Exception as e:
+                print(f"❌ Error en cancelar: {e}")
+                bot.delete_message(call.message.chat.id, call.message.message_id)
+        else:
+            bot.answer_callback_query(call.id, "⚠️ Comando no reconocido")
+            
+    except Exception as e:
+        print(f"❌ Error en callback handler: {e}")
+        try:
+            bot.answer_callback_query(call.id, "❌ Error procesando comando")
+        except:
+            pass
 
 # =============================================================================
 # ENDPOINTS FLASK PARA SINCRONIZACIÓN
