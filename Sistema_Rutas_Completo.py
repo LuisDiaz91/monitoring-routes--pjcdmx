@@ -403,66 +403,66 @@ class CoreRouteGenerator:
         
         return direccion.strip()
 
-def _calcular_distancia(self, coord1, coord2):
-    """Calcula distancia en kilómetros entre dos coordenadas"""
-    lat1, lon1 = coord1
-    lat2, lon2 = coord2
-    
-    R = 6371
-    dlat = math.radians(lat2 - lat1)
-    dlon = math.radians(lon2 - lon1)
-    a = (math.sin(dlat/2) * math.sin(dlat/2) + 
-         math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * 
-         math.sin(dlon/2) * math.sin(dlon/2))
-    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
-    return R * c
+    def _calcular_distancia(self, coord1, coord2):
+        """Calcula distancia en kilómetros entre dos coordenadas"""
+        lat1, lon1 = coord1
+        lat2, lon2 = coord2
+        
+        R = 6371
+        dlat = math.radians(lat2 - lat1)
+        dlon = math.radians(lon2 - lon1)
+        a = (math.sin(dlat/2) * math.sin(dlat/2) + 
+             math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * 
+             math.sin(dlon/2) * math.sin(dlon/2))
+        c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
+        return R * c
 
-def _agrupar_por_edificio(self, filas):
-    """🎯 Agrupa por edificio/institución - CADA EDIFICIO ES UNA PARADA"""
-    grupos = {}
-    
-    for idx, fila in filas.iterrows():
-        direccion = str(fila.get('DIRECCIÓN', '')).strip()
-        if not direccion or direccion in ['nan', '']:
-            continue
+    def _agrupar_por_edificio(self, filas):
+        """🎯 Agrupa por edificio/institución - CADA EDIFICIO ES UNA PARADA"""
+        grupos = {}
+        
+        for idx, fila in filas.iterrows():
+            direccion = str(fila.get('DIRECCIÓN', '')).strip()
+            if not direccion or direccion in ['nan', '']:
+                continue
+                
+            # Normalizar dirección para agrupar por edificio
+            direccion_normalizada = self._normalizar_direccion(direccion)
             
-        # Normalizar dirección para agrupar por edificio
-        direccion_normalizada = self._normalizar_direccion(direccion)
+            # Buscar edificio existente o crear uno nuevo
+            edificio_existente = None
+            for edificio_key in grupos.keys():
+                if self._es_mismo_edificio(direccion_normalizada, edificio_key):
+                    edificio_existente = edificio_key
+                    break
+            
+            if edificio_existente:
+                # Agregar persona al edificio existente
+                grupos[edificio_existente]['personas'].append(fila)
+                grupos[edificio_existente]['indices'].append(idx)
+            else:
+                # Crear nuevo edificio
+                coords = self._geocode(direccion)
+                if coords:
+                    grupos[direccion_normalizada] = {
+                        'coordenadas': coords,
+                        'personas': [fila],
+                        'indices': [idx],
+                        'direccion_original': direccion
+                    }
         
-        # Buscar edificio existente o crear uno nuevo
-        edificio_existente = None
-        for edificio_key in grupos.keys():
-            if self._es_mismo_edificio(direccion_normalizada, edificio_key):
-                edificio_existente = edificio_key
-                break
+        # Convertir a lista de grupos (coords, personas, indices)
+        lista_grupos = []
+        for direccion_key, datos in grupos.items():
+            lista_grupos.append((
+                datos['coordenadas'],
+                datos['personas'],
+                datos['indices']  # 🆕 Incluir índices originales
+            ))
+            self._log(f"🏢 Edificio: {direccion_key[:50]}... → {len(datos['personas'])} personas")
         
-        if edificio_existente:
-            # Agregar persona al edificio existente
-            grupos[edificio_existente]['personas'].append(fila)
-            grupos[edificio_existente]['indices'].append(idx)
-        else:
-            # Crear nuevo edificio
-            coords = self._geocode(direccion)
-            if coords:
-                grupos[direccion_normalizada] = {
-                    'coordenadas': coords,
-                    'personas': [fila],
-                    'indices': [idx],
-                    'direccion_original': direccion
-                }
-    
-    # Convertir a lista de grupos (coords, personas, indices)
-    lista_grupos = []
-    for direccion_key, datos in grupos.items():
-        lista_grupos.append((
-            datos['coordenadas'],
-            datos['personas'],
-            datos['indices']  # 🆕 Incluir índices originales
-        ))
-        self._log(f"🏢 Edificio: {direccion_key[:50]}... → {len(datos['personas'])} personas")
-    
-    self._log(f"🎯 Agrupamiento por edificio: {len(lista_grupos)} edificios de {len(filas)} registros")
-    return lista_grupos
+        self._log(f"🎯 Agrupamiento por edificio: {len(lista_grupos)} edificios de {len(filas)} registros")
+        return lista_grupos
     
     def _es_mismo_edificio(self, dir1, dir2):
         """Determina si dos direcciones pertenecen al mismo edificio"""
@@ -487,7 +487,7 @@ def _agrupar_por_edificio(self, filas):
         coords_list = []
         filas_agrupadas = []
         
-        for coords, grupo_filas in grupos_edificios:
+        for coords, grupo_filas, grupo_indices in grupos_edificios:
             coords_list.append(coords)
             filas_agrupadas.append({
                 'coordenadas': coords,
@@ -772,210 +772,210 @@ def _agrupar_por_edificio(self, filas):
         }
 
     def generate_routes(self):
-    self._log("Starting Core Route Generation Process")
-    self._log(f"Initial data records: {len(self.df)}")
-    if self.df.empty:
-        self._log("No data to process.")
-        return []
-    
-    df_clean = self.df.copy()
-    if 'DIRECCIÓN' in df_clean.columns:
-        df_clean['DIRECCIÓN'] = df_clean['DIRECCIÓN'].astype(str).str.replace('\n', ' ', regex=False).str.strip()
-        df_clean['DIRECCIÓN'] = df_clean['DIRECCIÓN'].str.split('/').str[0]
+        self._log("Starting Core Route Generation Process")
+        self._log(f"Initial data records: {len(self.df)}")
+        if self.df.empty:
+            self._log("No data to process.")
+            return []
         
-        mask = (
-            df_clean['DIRECCIÓN'].str.contains(r'CDMX|CIUDAD DE MÉXICO|CIUDAD DE MEXICO', case=False, na=False) |
-            df_clean['DIRECCIÓN'].str.contains(r'CD\.MX|MÉXICO D\.F\.|MEXICO D\.F\.', case=False, na=False) |
-            (df_clean['ALCALDÍA'].notna() if 'ALCALDÍA' in df_clean.columns else False)
-        )
-        df_clean = df_clean[mask]
-        self._log(f"📍 Registros después de filtro inteligente: {len(df_clean)}")
-    else:
-        self._log("'DIRECCIÓN' column not found.")
-        return []
-    
-    def extraer_alcaldia(d):
-        d = str(d).upper()
-        alcaldias = {
-            'CUAUHTEMOC': ['CUAUHTEMOC', 'CUÁUHTEMOC', 'DOCTORES', 'CENTRO', 'JUÁREZ', 'ROMA', 'CONDESA'],
-            'MIGUEL HIDALGO': ['MIGUEL HIDALGO', 'POLANCO', 'LOMAS', 'CHAPULTEPEC'],
-            'BENITO JUAREZ': ['BENITO JUÁREZ', 'DEL VALLE', 'NÁPOLES'],
-            'ALVARO OBREGON': ['ÁLVARO OBREGÓN', 'SAN ÁNGEL', 'LAS ÁGUILAS'],
-            'COYOACAN': ['COYOACÁN', 'COYOACAN'],
-            'TLALPAN': ['TLALPAN'],
-            'IZTAPALAPA': ['IZTAPALAPA'],
-            'GUSTAVO A. MADERO': ['GUSTAVO A. MADERO'],
-            'AZCAPOTZALCO': ['AZCAPOTZALCO'],
-            'VENUSTIANO CARRANZA': ['VENUSTIANO CARRANZA'],
-            'XOCHIMILCO': ['XOCHIMILCO'],
-            'IZTACALCO': ['IZTACALCO'],
-            'MILPA ALTA': ['MILPA ALTA'],
-            'TLÁHUAC': ['TLÁHUAC']
-        }
-        for alc, palabras in alcaldias.items():
-            if any(p in d for p in palabras):
-                return alc.title()
-        return "NO IDENTIFICADA"
-    
-    df_clean['Alcaldia'] = df_clean['DIRECCIÓN'].apply(extraer_alcaldia)
-    
-    ZONAS = {
-        'CENTRO': ['Cuauhtemoc', 'Venustiano Carranza', 'Miguel Hidalgo'],
-        'SUR': ['Coyoacán', 'Tlalpan', 'Álvaro Obregón', 'Benito Juárez'],
-        'ORIENTE': ['Iztacalco', 'Iztapalapa', 'Gustavo A. Madero'],
-        'SUR_ORIENTE': ['Xochimilco', 'Milpa Alta', 'Tláhuac'],
-    }
-    
-    def asignar_zona(alc):
-        for zona_name, alcaldias_in_zone in ZONAS.items():
-            if alc in alcaldias_in_zone:
-                return zona_name
-        return 'OTRAS'
-    
-    df_clean['Zona'] = df_clean['Alcaldia'].apply(asignar_zona)
-    
-    # 🎯 ESTRATEGIA SOVIÉTICA: 8 EDIFICIOS EXACTOS POR RUTA
-    PARADAS_POR_RUTA = 8  # 🚀 8 PARADAS EXACTAS
-    
-    self._log(f"🎯 MODO SOVIÉTICO ACTIVADO: {PARADAS_POR_RUTA} edificios por ruta")
-    
-    # Primero, agrupar todos los registros por edificio
-    todos_edificios = []
-    
-    for zona in df_clean['Zona'].unique():
-        registros_zona = df_clean[df_clean['Zona'] == zona]
-        self._log(f"🔍 Procesando zona {zona}: {len(registros_zona)} registros")
-        
-        # Agrupar por edificio en esta zona
-        grupos_edificios = self._agrupar_por_edificio(registros_zona)
-        
-        for coords, personas in grupos_edificios:
-            todos_edificios.append({
-                'zona': zona,
-                'coordenadas': coords,
-                'personas': personas,
-                'cantidad_personas': len(personas),
-                'direccion': str(personas[0].get('DIRECCIÓN', 'N/A')) if personas else 'N/A'
-            })
-    
-    self._log(f"🏗️ Total de edificios únicos encontrados: {len(todos_edificios)}")
-    
-    # 🎯 CREAR RUTAS DE 8 EDIFICIOS EXACTOS
-    rutas_finales = []
-    ruta_actual = []
-    ruta_id = 1
-    
-    for edificio in todos_edificios:
-        ruta_actual.append(edificio)
-        
-        # Cuando tenemos 8 edificios, crear la ruta
-        if len(ruta_actual) == PARADAS_POR_RUTA:
-            # Determinar zona predominante para la ruta
-            zonas_en_ruta = [e['zona'] for e in ruta_actual]
-            zona_predominante = max(set(zonas_en_ruta), key=zonas_en_ruta.count)
+        df_clean = self.df.copy()
+        if 'DIRECCIÓN' in df_clean.columns:
+            df_clean['DIRECCIÓN'] = df_clean['DIRECCIÓN'].astype(str).str.replace('\n', ' ', regex=False).str.strip()
+            df_clean['DIRECCIÓN'] = df_clean['DIRECCIÓN'].str.split('/').str[0]
             
-            # Crear la ruta
-            self._log(f"🛣️ Creando Ruta {ruta_id}: {zona_predominante} ({len(ruta_actual)} edificios)")
-            
-            # Extraer índices para la ruta
-            indices_ruta = []
-            for edificio_data in ruta_actual:
-                primera_persona = edificio_data['personas'][0]
-                # Encontrar el índice original en el DataFrame
-                for idx, row in df_clean.iterrows():
-                    if str(row.get('DIRECCIÓN', '')).strip() == edificio_data['direccion']:
-                        indices_ruta.append(idx)
-                        break
-            
-            # Crear archivos de la ruta
-            try:
-                result = self._crear_ruta_archivos(zona_predominante, indices_ruta, ruta_id)
-                if result:
-                    rutas_finales.append(result)
-                    self._log(f"✅ Ruta {ruta_id} creada: {result['paradas']} edificios")
-                else:
-                    self._log(f"❌ Error creando Ruta {ruta_id}")
-            except Exception as e:
-                self._log(f"❌ Error en Ruta {ruta_id}: {str(e)}")
-            
-            # Reiniciar para la siguiente ruta
-            ruta_actual = []
-            ruta_id += 1
-    
-    # 🎯 MANEJAR EDIFICIOS RESTANTES (si no completan 8)
-    if ruta_actual:
-        self._log(f"📦 Procesando edificios restantes: {len(ruta_actual)}")
-        
-        if len(ruta_actual) >= 4:  # Si hay al menos 4, crear ruta
-            zonas_en_ruta = [e['zona'] for e in ruta_actual]
-            zona_predominante = max(set(zonas_en_ruta), key=zonas_en_ruta.count) if zonas_en_ruta else 'OTRAS'
-            
-            self._log(f"🛣️ Creando Ruta final {ruta_id}: {zona_predominante} ({len(ruta_actual)} edificios)")
-            
-            indices_ruta = []
-            for edificio_data in ruta_actual:
-                primera_persona = edificio_data['personas'][0]
-                for idx, row in df_clean.iterrows():
-                    if str(row.get('DIRECCIÓN', '')).strip() == edificio_data['direccion']:
-                        indices_ruta.append(idx)
-                        break
-            
-            try:
-                result = self._crear_ruta_archivos(zona_predominante, indices_ruta, ruta_id)
-                if result:
-                    rutas_finales.append(result)
-                    self._log(f"✅ Ruta final {ruta_id}: {result['paradas']} edificios")
-            except Exception as e:
-                self._log(f"❌ Error en Ruta final {ruta_id}: {str(e)}")
+            mask = (
+                df_clean['DIRECCIÓN'].str.contains(r'CDMX|CIUDAD DE MÉXICO|CIUDAD DE MEXICO', case=False, na=False) |
+                df_clean['DIRECCIÓN'].str.contains(r'CD\.MX|MÉXICO D\.F\.|MEXICO D\.F\.', case=False, na=False) |
+                (df_clean['ALCALDÍA'].notna() if 'ALCALDÍA' in df_clean.columns else False)
+            )
+            df_clean = df_clean[mask]
+            self._log(f"📍 Registros después de filtro inteligente: {len(df_clean)}")
         else:
-            self._log(f"⚠️ Edificios restantes insuficientes: {len(ruta_actual)} (se descartan)")
-    
-    # GUARDAR RESULTADOS
-    self.results = rutas_finales
-    
-    try:
-        with open(self.CACHE_FILE, 'w') as f:
-            json.dump(self.GEOCODE_CACHE, f)
-        self._log("Geocode cache saved.")
-    except Exception as e:
-        self._log(f"Error saving cache: {str(e)}")
-    
-    if self.results:
-        resumen_df = pd.DataFrame([{
-            'Ruta': r['ruta_id'],
-            'Zona': r['zona'],
-            'Edificios': r['paradas'],
-            'Personas': r['personas'],
-            'Distancia_km': r['distancia'],
-            'Tiempo_min': r['tiempo'],
-            'Excel': os.path.basename(r['excel']),
-            'Mapa': os.path.basename(r['mapa'])
-        } for r in self.results])
+            self._log("'DIRECCIÓN' column not found.")
+            return []
+        
+        def extraer_alcaldia(d):
+            d = str(d).upper()
+            alcaldias = {
+                'CUAUHTEMOC': ['CUAUHTEMOC', 'CUÁUHTEMOC', 'DOCTORES', 'CENTRO', 'JUÁREZ', 'ROMA', 'CONDESA'],
+                'MIGUEL HIDALGO': ['MIGUEL HIDALGO', 'POLANCO', 'LOMAS', 'CHAPULTEPEC'],
+                'BENITO JUAREZ': ['BENITO JUÁREZ', 'DEL VALLE', 'NÁPOLES'],
+                'ALVARO OBREGON': ['ÁLVARO OBREGÓN', 'SAN ÁNGEL', 'LAS ÁGUILAS'],
+                'COYOACAN': ['COYOACÁN', 'COYOACAN'],
+                'TLALPAN': ['TLALPAN'],
+                'IZTAPALAPA': ['IZTAPALAPA'],
+                'GUSTAVO A. MADERO': ['GUSTAVO A. MADERO'],
+                'AZCAPOTZALCO': ['AZCAPOTZALCO'],
+                'VENUSTIANO CARRANZA': ['VENUSTIANO CARRANZA'],
+                'XOCHIMILCO': ['XOCHIMILCO'],
+                'IZTACALCO': ['IZTACALCO'],
+                'MILPA ALTA': ['MILPA ALTA'],
+                'TLÁHUAC': ['TLÁHUAC']
+            }
+            for alc, palabras in alcaldias.items():
+                if any(p in d for p in palabras):
+                    return alc.title()
+            return "NO IDENTIFICADA"
+        
+        df_clean['Alcaldia'] = df_clean['DIRECCIÓN'].apply(extraer_alcaldia)
+        
+        ZONAS = {
+            'CENTRO': ['Cuauhtemoc', 'Venustiano Carranza', 'Miguel Hidalgo'],
+            'SUR': ['Coyoacán', 'Tlalpan', 'Álvaro Obregón', 'Benito Juárez'],
+            'ORIENTE': ['Iztacalco', 'Iztapalapa', 'Gustavo A. Madero'],
+            'SUR_ORIENTE': ['Xochimilco', 'Milpa Alta', 'Tláhuac'],
+        }
+        
+        def asignar_zona(alc):
+            for zona_name, alcaldias_in_zone in ZONAS.items():
+                if alc in alcaldias_in_zone:
+                    return zona_name
+            return 'OTRAS'
+        
+        df_clean['Zona'] = df_clean['Alcaldia'].apply(asignar_zona)
+        
+        # 🎯 ESTRATEGIA SOVIÉTICA: 8 EDIFICIOS EXACTOS POR RUTA
+        PARADAS_POR_RUTA = 8  # 🚀 8 PARADAS EXACTAS
+        
+        self._log(f"🎯 MODO SOVIÉTICO ACTIVADO: {PARADAS_POR_RUTA} edificios por ruta")
+        
+        # Primero, agrupar todos los registros por edificio
+        todos_edificios = []
+        
+        for zona in df_clean['Zona'].unique():
+            registros_zona = df_clean[df_clean['Zona'] == zona]
+            self._log(f"🔍 Procesando zona {zona}: {len(registros_zona)} registros")
+            
+            # Agrupar por edificio en esta zona
+            grupos_edificios = self._agrupar_por_edificio(registros_zona)
+            
+            for coords, personas, indices in grupos_edificios:
+                todos_edificios.append({
+                    'zona': zona,
+                    'coordenadas': coords,
+                    'personas': personas,
+                    'cantidad_personas': len(personas),
+                    'direccion': str(personas[0].get('DIRECCIÓN', 'N/A')) if personas else 'N/A'
+                })
+        
+        self._log(f"🏗️ Total de edificios únicos encontrados: {len(todos_edificios)}")
+        
+        # 🎯 CREAR RUTAS DE 8 EDIFICIOS EXACTOS
+        rutas_finales = []
+        ruta_actual = []
+        ruta_id = 1
+        
+        for edificio in todos_edificios:
+            ruta_actual.append(edificio)
+            
+            # Cuando tenemos 8 edificios, crear la ruta
+            if len(ruta_actual) == PARADAS_POR_RUTA:
+                # Determinar zona predominante para la ruta
+                zonas_en_ruta = [e['zona'] for e in ruta_actual]
+                zona_predominante = max(set(zonas_en_ruta), key=zonas_en_ruta.count)
+                
+                # Crear la ruta
+                self._log(f"🛣️ Creando Ruta {ruta_id}: {zona_predominante} ({len(ruta_actual)} edificios)")
+                
+                # Extraer índices para la ruta
+                indices_ruta = []
+                for edificio_data in ruta_actual:
+                    primera_persona = edificio_data['personas'][0]
+                    # Encontrar el índice original en el DataFrame
+                    for idx, row in df_clean.iterrows():
+                        if str(row.get('DIRECCIÓN', '')).strip() == edificio_data['direccion']:
+                            indices_ruta.append(idx)
+                            break
+                
+                # Crear archivos de la ruta
+                try:
+                    result = self._crear_ruta_archivos(zona_predominante, indices_ruta, ruta_id)
+                    if result:
+                        rutas_finales.append(result)
+                        self._log(f"✅ Ruta {ruta_id} creada: {result['paradas']} edificios")
+                    else:
+                        self._log(f"❌ Error creando Ruta {ruta_id}")
+                except Exception as e:
+                    self._log(f"❌ Error en Ruta {ruta_id}: {str(e)}")
+                
+                # Reiniciar para la siguiente ruta
+                ruta_actual = []
+                ruta_id += 1
+        
+        # 🎯 MANEJAR EDIFICIOS RESTANTES (si no completan 8)
+        if ruta_actual:
+            self._log(f"📦 Procesando edificios restantes: {len(ruta_actual)}")
+            
+            if len(ruta_actual) >= 4:  # Si hay al menos 4, crear ruta
+                zonas_en_ruta = [e['zona'] for e in ruta_actual]
+                zona_predominante = max(set(zonas_en_ruta), key=zonas_en_ruta.count) if zonas_en_ruta else 'OTRAS'
+                
+                self._log(f"🛣️ Creando Ruta final {ruta_id}: {zona_predominante} ({len(ruta_actual)} edificios)")
+                
+                indices_ruta = []
+                for edificio_data in ruta_actual:
+                    primera_persona = edificio_data['personas'][0]
+                    for idx, row in df_clean.iterrows():
+                        if str(row.get('DIRECCIÓN', '')).strip() == edificio_data['direccion']:
+                            indices_ruta.append(idx)
+                            break
+                
+                try:
+                    result = self._crear_ruta_archivos(zona_predominante, indices_ruta, ruta_id)
+                    if result:
+                        rutas_finales.append(result)
+                        self._log(f"✅ Ruta final {ruta_id}: {result['paradas']} edificios")
+                except Exception as e:
+                    self._log(f"❌ Error en Ruta final {ruta_id}: {str(e)}")
+            else:
+                self._log(f"⚠️ Edificios restantes insuficientes: {len(ruta_actual)} (se descartan)")
+        
+        # GUARDAR RESULTADOS
+        self.results = rutas_finales
+        
         try:
-            resumen_df.to_excel("RESUMEN_RUTAS.xlsx", index=False)
-            self._log("Summary 'RESUMEN_RUTAS.xlsx' generated.")
+            with open(self.CACHE_FILE, 'w') as f:
+                json.dump(self.GEOCODE_CACHE, f)
+            self._log("Geocode cache saved.")
         except Exception as e:
-            self._log(f"Error generating summary: {str(e)}")
-    
-    total_routes_gen = len(self.results)
-    total_edificios = sum(r['paradas'] for r in self.results) if self.results else 0
-    total_personas = sum(r['personas'] for r in self.results) if self.results else 0
-    
-    self._log("CORE ROUTE GENERATION COMPLETED")
-    self._log(f"FINAL SUMMARY: {total_routes_gen} routes, {total_edificios} edificios, {total_personas} personas")
-    
-    # 🎯 RESUMEN SOVIÉTICO
-    rutas_perfectas = sum(1 for r in self.results if r['paradas'] == PARADAS_POR_RUTA)
-    rutas_aceptables = sum(1 for r in self.results if r['paradas'] >= 4 and r['paradas'] < PARADAS_POR_RUTA)
-    rutas_insuficientes = sum(1 for r in self.results if r['paradas'] < 4)
-    
-    self._log(f"📊 RESUMEN SOVIÉTICO: {rutas_perfectas} perfectas ({PARADAS_POR_RUTA} edificios), {rutas_aceptables} aceptables (4-7), {rutas_insuficientes} insuficientes (<4)")
-    
-    if rutas_perfectas > 0:
-        self._log("🎯 OBJETIVO CUMPLIDO: Rutas con 8 edificios exactos creadas")
-    
-    return self.results
-    
+            self._log(f"Error saving cache: {str(e)}")
+        
+        if self.results:
+            resumen_df = pd.DataFrame([{
+                'Ruta': r['ruta_id'],
+                'Zona': r['zona'],
+                'Edificios': r['paradas'],
+                'Personas': r['personas'],
+                'Distancia_km': r['distancia'],
+                'Tiempo_min': r['tiempo'],
+                'Excel': os.path.basename(r['excel']),
+                'Mapa': os.path.basename(r['mapa'])
+            } for r in self.results])
+            try:
+                resumen_df.to_excel("RESUMEN_RUTAS.xlsx", index=False)
+                self._log("Summary 'RESUMEN_RUTAS.xlsx' generated.")
+            except Exception as e:
+                self._log(f"Error generating summary: {str(e)}")
+        
+        total_routes_gen = len(self.results)
+        total_edificios = sum(r['paradas'] for r in self.results) if self.results else 0
+        total_personas = sum(r['personas'] for r in self.results) if self.results else 0
+        
+        self._log("CORE ROUTE GENERATION COMPLETED")
+        self._log(f"FINAL SUMMARY: {total_routes_gen} routes, {total_edificios} edificios, {total_personas} personas")
+        
+        # 🎯 RESUMEN SOVIÉTICO
+        rutas_perfectas = sum(1 for r in self.results if r['paradas'] == PARADAS_POR_RUTA)
+        rutas_aceptables = sum(1 for r in self.results if r['paradas'] >= 4 and r['paradas'] < PARADAS_POR_RUTA)
+        rutas_insuficientes = sum(1 for r in self.results if r['paradas'] < 4)
+        
+        self._log(f"📊 RESUMEN SOVIÉTICO: {rutas_perfectas} perfectas ({PARADAS_POR_RUTA} edificios), {rutas_aceptables} aceptables (4-7), {rutas_insuficientes} insuficientes (<4)")
+        
+        if rutas_perfectas > 0:
+            self._log("🎯 OBJETIVO CUMPLIDO: Rutas con 8 edificios exactos creadas")
+        
+        return self.results
+
 # =============================================================================
 # CLASE INTERFAZ GRÁFICA (SistemaRutasGUI) - VERSIÓN CORREGIDA
 # =============================================================================
