@@ -1,4 +1,4 @@
-# sistema_rutas_completo_mejorado_final.py
+# sistema_rutas_completo_agrupamiento_edificios.py
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, scrolledtext
 import pandas as pd
@@ -21,7 +21,7 @@ import math
 import re
 
 # =============================================================================
-# CLASE CONEXIÓN CON BOT RAILWAY - MEJORADA (COMPLETA)
+# CLASE CONEXIÓN CON BOT RAILWAY
 # =============================================================================
 class ConexionBotRailway:
     def __init__(self, url_base):
@@ -101,7 +101,7 @@ class ConexionBotRailway:
             return False
 
 # =============================================================================
-# CLASE GESTOR TELEGRAM (GestorTelegram) - ACTUALIZADA
+# CLASE GESTOR TELEGRAM
 # =============================================================================
 class GestorTelegram:
     def __init__(self, gui):
@@ -120,7 +120,6 @@ class GestorTelegram:
                             ruta_data = json.load(f)
                             
                         if ruta_data.get('estado') == 'pendiente':
-                            # Calcular progreso
                             paradas = ruta_data.get('paradas', [])
                             entregadas = sum(1 for p in paradas if p.get('estado') == 'entregado')
                             
@@ -162,10 +161,8 @@ class GestorTelegram:
     def obtener_avances_recientes(self, limite=10):
         """Obtiene los avances más recientes de las rutas"""
         try:
-            # Primero intentar obtener del bot en Railway
             avances_bot = self.conexion.obtener_avances_pendientes()
             
-            # También buscar en archivos locales
             avances_locales = []
             if os.path.exists("avances_ruta"):
                 archivos_avance = sorted(os.listdir("avances_ruta"), reverse=True)[:limite]
@@ -176,7 +173,6 @@ class GestorTelegram:
                             avance_data = json.load(f)
                             avances_locales.append(avance_data)
             
-            # Combinar y ordenar por timestamp
             todos_avances = avances_bot + avances_locales
             todos_avances.sort(key=lambda x: x.get('timestamp', ''), reverse=True)
             
@@ -191,13 +187,11 @@ class GestorTelegram:
         try:
             actualizaciones = 0
             
-            # Obtener avances del bot
             avances = self.conexion.obtener_avances_pendientes()
             
             for avance in avances:
                 if self._procesar_avance_desde_bot(avance):
                     actualizaciones += 1
-                    # Marcar como procesado en el bot
                     avance_id = avance.get('id')
                     if avance_id:
                         self.conexion.marcar_avance_procesado(avance_id)
@@ -221,7 +215,6 @@ class GestorTelegram:
             if not persona_entregada or not ruta_id:
                 return False
             
-            # Buscar archivo Excel de la ruta
             archivos_encontrados = []
             
             for archivo in os.listdir("rutas_excel"):
@@ -234,21 +227,17 @@ class GestorTelegram:
             
             excel_file = f"rutas_excel/{archivos_encontrados[0]}"
             
-            # Leer y actualizar Excel
             df = pd.read_excel(excel_file)
             persona_encontrada = False
             
-            # Búsqueda flexible del nombre
             for idx, fila in df.iterrows():
                 nombre_en_excel = str(fila.get('Nombre', '')).strip().lower()
                 persona_buscar = persona_entregada.lower()
                 
-                # Buscar coincidencias (contiene o es similar)
                 if (persona_buscar in nombre_en_excel or 
                     nombre_en_excel in persona_buscar or
                     self._coincidencia_flexible_nombres(persona_buscar, nombre_en_excel)):
                     
-                    # ACTUALIZAR EXCEL CON LINK DE FOTO
                     link_foto = f"=HIPERVINCULO(\"{foto_ruta}\", \"VER FOTO\")" if foto_ruta else "SIN FOTO"
                     df.at[idx, 'Acuse'] = f"✅ ENTREGADO - {timestamp}"
                     df.at[idx, 'Repartidor'] = repartidor
@@ -261,7 +250,6 @@ class GestorTelegram:
                     break
             
             if persona_encontrada:
-                # Guardar cambios en Excel
                 df.to_excel(excel_file, index=False)
                 self.gui.log(f"💾 Excel guardado: {os.path.basename(excel_file)}")
                 return True
@@ -275,13 +263,11 @@ class GestorTelegram:
 
     def _coincidencia_flexible_nombres(self, nombre1, nombre2):
         """Coincidencia inteligente de nombres"""
-        # Eliminar títulos comunes
         palabras_comunes = ['lic', 'lic.', 'ingeniero', 'ing', 'dr', 'doctor', 'mtro', 'maestro', 'sr', 'sra']
         
         n1_clean = ' '.join([p for p in nombre1.split() if p.lower() not in palabras_comunes])
         n2_clean = ' '.join([p for p in nombre2.split() if p.lower() not in palabras_comunes])
         
-        # Coincidencia por palabras clave
         palabras1 = set(n1_clean.lower().split())
         palabras2 = set(n2_clean.lower().split())
         
@@ -290,7 +276,6 @@ class GestorTelegram:
     def simular_entrega_bot(self, ruta_id, repartidor, persona):
         """Simula una entrega para pruebas del sistema"""
         try:
-            # Crear avance simulado
             avance_simulado = {
                 'ruta_id': ruta_id,
                 'repartidor': repartidor,
@@ -300,14 +285,12 @@ class GestorTelegram:
                 'tipo': 'entrega_simulada'
             }
             
-            # Guardar avance localmente
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             archivo_avance = f"avances_ruta/avance_{timestamp}.json"
             
             with open(archivo_avance, 'w', encoding='utf-8') as f:
                 json.dump(avance_simulado, f, indent=2, ensure_ascii=False)
             
-            # Actualizar Excel correspondiente
             self._procesar_avance_desde_bot(avance_simulado)
             
             self.gui.log(f"🧪 Entrega simulada: {persona} por {repartidor}")
@@ -318,7 +301,7 @@ class GestorTelegram:
             return False
 
 # =============================================================================
-# CLASE PRINCIPAL - MOTOR DE RUTAS (CoreRouteGenerator) - MEJORADO CON AGRUPAMIENTO
+# CLASE PRINCIPAL - MOTOR DE RUTAS CON AGRUPAMIENTO POR EDIFICIO
 # =============================================================================
 class CoreRouteGenerator:
     def __init__(self, df, api_key, origen_coords, origen_name, max_stops_per_route):
@@ -380,15 +363,11 @@ class CoreRouteGenerator:
         return None
 
     def _normalizar_direccion(self, direccion):
-        """Normaliza direcciones para agrupar mejor"""
-        # Convertir a minúsculas y quitar acentos
+        """Normaliza direcciones para agrupar por edificio"""
         direccion = direccion.lower().strip()
-        
-        # Quitar caracteres especiales y múltiples espacios
         direccion = re.sub(r'[^\w\s]', ' ', direccion)
         direccion = re.sub(r'\s+', ' ', direccion)
         
-        # Abreviaturas comunes
         reemplazos = {
             r'\bav\b': 'avenida',
             r'\bav\.': 'avenida',
@@ -418,7 +397,6 @@ class CoreRouteGenerator:
         for patron, reemplazo in reemplazos.items():
             direccion = re.sub(patron, reemplazo, direccion)
         
-        # Quitar palabras comunes que no ayudan a la agrupación
         palabras_comunes = ['ciudad de mexico', 'mexico', 'cdmx', 'alcaldia', 'delegacion']
         for palabra in palabras_comunes:
             direccion = direccion.replace(palabra, '')
@@ -430,8 +408,7 @@ class CoreRouteGenerator:
         lat1, lon1 = coord1
         lat2, lon2 = coord2
         
-        # Fórmula Haversine
-        R = 6371  # Radio de la Tierra en km
+        R = 6371
         dlat = math.radians(lat2 - lat1)
         dlon = math.radians(lon2 - lon1)
         a = (math.sin(dlat/2) * math.sin(dlat/2) + 
@@ -440,83 +417,80 @@ class CoreRouteGenerator:
         c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
         return R * c
 
-    def _agrupar_ubicaciones_similares(self, filas):
-        """Agrupa personas en la misma ubicación física de manera más inteligente"""
-        grupos = []
-        coordenadas_procesadas = []
+    def _agrupar_por_edificio(self, filas):
+        """🎯 NUEVO: Agrupa por edificio/institución - CADA EDIFICIO ES UNA PARADA"""
+        grupos = {}
         
-        # Primero, normalizar todas las direcciones
-        direcciones_normalizadas = []
         for _, fila in filas.iterrows():
             direccion = str(fila.get('DIRECCIÓN', '')).strip()
             if not direccion or direccion in ['nan', '']:
                 continue
                 
-            # Normalización más agresiva de direcciones
-            direccion_clean = self._normalizar_direccion(direccion)
-            direcciones_normalizadas.append((direccion_clean, fila))
-        
-        # Agrupar por dirección normalizada primero (más rápido)
-        grupos_por_direccion = {}
-        for dir_clean, fila in direcciones_normalizadas:
-            if dir_clean not in grupos_por_direccion:
-                grupos_por_direccion[dir_clean] = []
-            grupos_por_direccion[dir_clean].append(fila)
-        
-        # Luego verificar coordenadas para direcciones similares
-        for dir_clean, grupo_filas in grupos_por_direccion.items():
-            if len(grupo_filas) > 1:
-                # Si ya están agrupados por dirección, tomamos la primera para geocodificar
-                primera_fila = grupo_filas[0]
-                direccion_original = str(primera_fila.get('DIRECCIÓN', '')).strip()
-                
-                coords = self._geocode(direccion_original)
-                if coords:
-                    grupos.append((coords, grupo_filas))
-                    coordenadas_procesadas.append(coords)
-                    self._log(f"📍 Grupo por dirección: {dir_clean[:50]}... → {len(grupo_filas)} personas")
-                continue
+            # Normalizar dirección para agrupar por edificio
+            direccion_normalizada = self._normalizar_direccion(direccion)
             
-            # Para direcciones únicas, procesar individualmente
-            for fila in grupo_filas:
-                direccion = str(fila.get('DIRECCIÓN', '')).strip()
+            # Buscar edificio existente o crear uno nuevo
+            edificio_existente = None
+            for edificio_key in grupos.keys():
+                if self._es_mismo_edificio(direccion_normalizada, edificio_key):
+                    edificio_existente = edificio_key
+                    break
+            
+            if edificio_existente:
+                # Agregar persona al edificio existente
+                grupos[edificio_existente]['personas'].append(fila)
+            else:
+                # Crear nuevo edificio
                 coords = self._geocode(direccion)
-                if not coords:
-                    continue
-                    
-                # Verificar si esta coordenada está cerca de alguna ya procesada
-                agrupado = False
-                for i, (coord_existente, grupo_existente) in enumerate(grupos):
-                    distancia = self._calcular_distancia(coords, coord_existente)
-                    # Si están a menos de 50 metros, considerar misma ubicación
-                    if distancia < 0.05:  # 50 metros
-                        grupo_existente.append(fila)
-                        agrupado = True
-                        self._log(f"📍 Agrupando por proximidad: {fila.get('NOMBRE', '')[:20]}...")
-                        break
-                
-                if not agrupado:
-                    grupos.append((coords, [fila]))
-                    coordenadas_procesadas.append(coords)
+                if coords:
+                    grupos[direccion_normalizada] = {
+                        'coordenadas': coords,
+                        'personas': [fila],
+                        'direccion_original': direccion
+                    }
         
-        self._log(f"🎯 Agrupamiento completado: {len(grupos)} ubicaciones únicas de {len(filas)} registros")
-        return grupos
+        # Convertir a lista de grupos
+        lista_grupos = []
+        for direccion_key, datos in grupos.items():
+            lista_grupos.append((
+                datos['coordenadas'],
+                datos['personas']
+            ))
+            self._log(f"🏢 Edificio: {direccion_key[:50]}... → {len(datos['personas'])} personas")
+        
+        self._log(f"🎯 Agrupamiento por edificio: {len(lista_grupos)} edificios de {len(filas)} registros")
+        return lista_grupos
+
+    def _es_mismo_edificio(self, dir1, dir2):
+        """Determina si dos direcciones pertenecen al mismo edificio"""
+        # Coincidencia exacta después de normalización
+        if dir1 == dir2:
+            return True
+        
+        # Coincidencia por palabras clave (mismo edificio)
+        palabras1 = set(dir1.split())
+        palabras2 = set(dir2.split())
+        
+        # Si comparten al menos 3 palabras clave, probablemente mismo edificio
+        palabras_comunes = palabras1.intersection(palabras2)
+        return len(palabras_comunes) >= 3
 
     def _optimizar_ruta(self, indices):
         filas = self.df.loc[indices]
         
-        # Agrupar ubicaciones similares
-        grupos_ubicaciones = self._agrupar_ubicaciones_similares(filas)
+        # 🎯 USAR AGRUPAMIENTO POR EDIFICIO
+        grupos_edificios = self._agrupar_por_edificio(filas)
         
         coords_list = []
         filas_agrupadas = []
         
-        for coords, grupo_filas in grupos_ubicaciones:
+        for coords, grupo_filas in grupos_edificios:
             coords_list.append(coords)
             filas_agrupadas.append({
                 'coordenadas': coords,
                 'personas': grupo_filas,
-                'cantidad_personas': len(grupo_filas)
+                'cantidad_personas': len(grupo_filas),
+                'es_edificio': True  # 🆕 TODOS son edificios ahora
             })
         
         if len(coords_list) < 2:
@@ -562,7 +536,7 @@ class CoreRouteGenerator:
         os.makedirs("mapas_pro", exist_ok=True)
         os.makedirs("rutas_excel", exist_ok=True)
         
-        # EXCEL MEJORADO CON AGRUPAMIENTO INTELIGENTE
+        # EXCEL CON AGRUPAMIENTO POR EDIFICIO
         excel_data = []
         orden_parada = 1
         
@@ -571,41 +545,40 @@ class CoreRouteGenerator:
             personas_grupo = grupo['personas']
             cantidad_personas = grupo['cantidad_personas']
             
-            # Para cada persona en el grupo, crear una fila en Excel
+            # 🎯 CADA EDIFICIO ES UNA PARADA, sin importar cuántas personas
+            primera_persona = personas_grupo[0]
+            direccion_edificio = str(primera_persona.get('DIRECCIÓN', 'N/A')).strip()
+            
+            # Para cada persona en el edificio, crear una fila en Excel
             for i, persona in enumerate(personas_grupo):
-                # Crear link para foto
+                # Crear link para foto - TODAS las personas del mismo edificio comparten número de parada
                 link_foto_base = f"fotos_entregas/Ruta_{ruta_id}_Parada_{orden_parada}"
                 if cantidad_personas > 1:
                     link_foto_base += f"_Persona_{i+1}"
                 
                 link_foto = f"=HIPERVINCULO(\"{link_foto_base}.jpg\", \"📸 VER FOTO\")"
                 
-                # Información de agrupamiento
-                info_grupo = ""
-                if cantidad_personas > 1:
-                    if i == 0:
-                        info_grupo = f"Líder de grupo ({cantidad_personas} personas)"
-                    else:
-                        info_grupo = f"Miembro {i+1} del grupo"
+                # Información del edificio
+                info_edificio = f"Edificio ({cantidad_personas} personas)" if i == 0 else f"Persona {i+1} en edificio"
                 
                 excel_data.append({
-                    'Orden': orden_parada,
+                    'Orden': orden_parada,  # 🎯 MISMO ORDEN PARA TODAS LAS PERSONAS DEL EDIFICIO
                     'Sub_Orden': i + 1 if cantidad_personas > 1 else '',
                     'Nombre': str(persona.get('NOMBRE', 'N/A')).split(',')[0].strip(),
                     'Dependencia': str(persona.get('ADSCRIPCIÓN', 'N/A')).strip(),
-                    'Dirección': str(persona.get('DIRECCIÓN', 'N/A')).strip(),
-                    'Personas_Misma_Ubicacion': cantidad_personas if i == 0 else '',
-                    'Tipo_Entrega': info_grupo,
+                    'Dirección': direccion_edificio,  # 🎯 MISMA DIRECCIÓN PARA TODAS
+                    'Personas_En_Edificio': cantidad_personas if i == 0 else '',
+                    'Tipo_Entrega': info_edificio,
                     'Acuse': '',
                     'Repartidor': '',
                     'Foto_Acuse': link_foto,
                     'Timestamp_Entrega': '',
                     'Estado': 'PENDIENTE',
                     'Coordenadas': f"{coordenadas_grupo[0]},{coordenadas_grupo[1]}",
-                    'Notas': f"Grupo de {cantidad_personas} personas en misma ubicación" if cantidad_personas > 1 else ''
+                    'Notas': f"Edificio con {cantidad_personas} personas" if cantidad_personas > 1 else ''
                 })
             
-            # Solo incrementar el orden principal cuando cambiamos de ubicación
+            # 🎯 SOLO UNA PARADA POR EDIFICIO - incrementar orden
             orden_parada += 1
         
         excel_df = pd.DataFrame(excel_data)
@@ -632,45 +605,33 @@ class CoreRouteGenerator:
         if poly:
             folium.PolyLine(polyline.decode(poly), color=color, weight=6, opacity=0.8).add_to(m)
         
-        # Marcadores de paradas
+        # Marcadores de paradas (EDIFICIOS)
         for i, (grupo, coord) in enumerate(zip(filas_opt, coords_opt), 1):
             cantidad_personas = grupo['cantidad_personas']
             primera_persona = grupo['personas'][0]
-            nombre = str(primera_persona.get('NOMBRE', 'N/A')).split(',')[0]
+            nombre_primero = str(primera_persona.get('NOMBRE', 'N/A')).split(',')[0]
             direccion = str(primera_persona.get('DIRECCIÓN', 'N/A'))[:70]
             
-            # Personalizar popup según cantidad de personas
-            if cantidad_personas > 1:
-                popup_html = f"""
-                <div style='font-family:Arial; width:300px;'>
-                    <b>📍 Parada #{i} ({cantidad_personas} personas)</b><br>
-                    <b>👥 {nombre} y {cantidad_personas-1} más</b><br>
-                    <small>{direccion}...</small>
-                </div>
-                """
-                icon_color = 'orange'
-                icono = 'users'
-            else:
-                popup_html = f"""
-                <div style='font-family:Arial; width:250px;'>
-                    <b>📍 Parada #{i}</b><br>
-                    <b>👤 {nombre}</b><br>
-                    <small>{direccion}...</small>
-                </div>
-                """
-                icon_color = 'red'
-                icono = self.ICONOS.get(zona, 'circle')
+            # 🎯 TODOS LOS EDIFICIOS SON PARADAS ÚNICAS
+            popup_html = f"""
+            <div style='font-family:Arial; width:300px;'>
+                <b>🏢 Parada #{i} - Edificio</b><br>
+                <b>👥 {cantidad_personas} personas</b><br>
+                <b>📍 {nombre_primero} y {cantidad_personas-1} más</b><br>
+                <small>{direccion}...</small>
+            </div>
+            """
             
             folium.Marker(
                 coord,
                 popup=popup_html,
-                tooltip=f"Parada #{i} ({cantidad_personas} pers)" if cantidad_personas > 1 else f"Parada #{i}",
-                icon=folium.Icon(color=icon_color, icon=icono, prefix='fa')
+                tooltip=f"🏢 Parada #{i} ({cantidad_personas} personas)",
+                icon=folium.Icon(color='orange', icon='building', prefix='fa')
             ).add_to(m)
         
         # Panel de información
         total_personas = sum(grupo['cantidad_personas'] for grupo in filas_opt)
-        total_paradas = len(filas_opt)
+        total_paradas = len(filas_opt)  # 🎯 PARADAS = EDIFICIOS
         
         info_panel_html = f"""
         <div style="position:fixed;top:10px;left:50px;z-index:1000;background:white;padding:15px;border-radius:10px;
@@ -679,7 +640,7 @@ class CoreRouteGenerator:
                 Ruta {ruta_id} - {zona}
             </h4>
             <small>
-                <b>📍 Paradas:</b> {total_paradas} | <b>👥 Personas:</b> {total_personas}<br>
+                <b>🏢 Edificios:</b> {total_paradas} | <b>👥 Personas:</b> {total_personas}<br>
                 <b>📏 Distancia:</b> {dist:.1f} km | <b>⏱️ Tiempo:</b> {tiempo:.0f} min<br>
                 <a href="file://{os.path.abspath(excel_file)}" target="_blank">📊 Descargar Excel</a>
             </small>
@@ -698,7 +659,7 @@ class CoreRouteGenerator:
         waypoints_param = "|".join([f"{lat},{lng}" for lat, lng in coords_opt])
         google_maps_url = f"https://www.google.com/maps/dir/?api=1&origin={self.origen_coords}&destination={self.origen_coords}&waypoints={waypoints_param}&travelmode=driving"
         
-        # Preparar paradas para Telegram
+        # Preparar paradas para Telegram (CADA EDIFICIO ES UNA PARADA)
         paradas_telegram = []
         orden_telegram = 1
         
@@ -706,25 +667,27 @@ class CoreRouteGenerator:
             coordenadas_grupo = grupo['coordenadas']
             personas_grupo = grupo['personas']
             cantidad_personas = grupo['cantidad_personas']
+            primera_persona = personas_grupo[0]
+            direccion_edificio = str(primera_persona.get('DIRECCIÓN', 'N/A')).strip()
             
-            for j, persona in enumerate(personas_grupo):
-                link_foto_base = f"fotos_entregas/Ruta_{ruta_id}_Parada_{orden_telegram}"
-                if cantidad_personas > 1:
-                    link_foto_base += f"_Persona_{j+1}"
-                
-                paradas_telegram.append({
-                    'orden': orden_telegram,
-                    'sub_orden': j + 1 if cantidad_personas > 1 else 1,
-                    'nombre': str(persona.get('NOMBRE', 'N/A')).split(',')[0].strip(),
-                    'direccion': str(persona.get('DIRECCIÓN', 'N/A')).strip(),
-                    'dependencia': str(persona.get('ADSCRIPCIÓN', 'N/A')).strip(),
-                    'coords': f"{coordenadas_grupo[0]},{coordenadas_grupo[1]}",
-                    'estado': 'pendiente',
-                    'timestamp_entrega': None,
-                    'foto_acuse': link_foto_base + ".jpg",
-                    'es_grupo': cantidad_personas > 1,
-                    'total_en_grupo': cantidad_personas if j == 0 else None
-                })
+            # 🎯 UNA SOLA PARADA EN TELEGRAM POR EDIFICIO
+            paradas_telegram.append({
+                'orden': orden_telegram,
+                'nombre_edificio': f"Edificio con {cantidad_personas} personas",
+                'direccion': direccion_edificio,
+                'coords': f"{coordenadas_grupo[0]},{coordenadas_grupo[1]}",
+                'estado': 'pendiente',
+                'timestamp_entrega': None,
+                'personas_en_edificio': cantidad_personas,
+                'lista_personas': [
+                    {
+                        'nombre': str(p.get('NOMBRE', 'N/A')).split(',')[0].strip(),
+                        'dependencia': str(p.get('ADSCRIPCIÓN', 'N/A')).strip(),
+                        'foto_acuse': f"fotos_entregas/Ruta_{ruta_id}_Parada_{orden_telegram}_Persona_{j+1}.jpg"
+                    }
+                    for j, p in enumerate(personas_grupo)
+                ]
+            })
             
             orden_telegram += 1
         
@@ -735,7 +698,7 @@ class CoreRouteGenerator:
             'google_maps_url': google_maps_url,
             'paradas': paradas_telegram,
             'estadisticas': {
-                'total_paradas': total_paradas,
+                'total_edificios': total_paradas,
                 'total_personas': total_personas,
                 'distancia_km': round(dist, 1),
                 'tiempo_min': round(tiempo),
@@ -775,7 +738,7 @@ class CoreRouteGenerator:
         return {
             'ruta_id': ruta_id,
             'zona': zona,
-            'paradas': total_paradas,
+            'paradas': total_paradas,  # 🎯 EDIFICIOS
             'personas': total_personas,
             'distancia': round(dist, 1),
             'tiempo': round(tiempo),
@@ -797,7 +760,6 @@ class CoreRouteGenerator:
             df_clean['DIRECCIÓN'] = df_clean['DIRECCIÓN'].astype(str).str.replace('\n', ' ', regex=False).str.strip()
             df_clean['DIRECCIÓN'] = df_clean['DIRECCIÓN'].str.split('/').str[0]
             
-            # 🎯 FILTRO INTELIGENTE
             mask = (
                 df_clean['DIRECCIÓN'].str.contains(r'CDMX|CIUDAD DE MÉXICO|CIUDAD DE MEXICO', case=False, na=False) |
                 df_clean['DIRECCIÓN'].str.contains(r'CD\.MX|MÉXICO D\.F\.|MEXICO D\.F\.', case=False, na=False) |
@@ -882,7 +844,7 @@ class CoreRouteGenerator:
             resumen_df = pd.DataFrame([{
                 'Ruta': r['ruta_id'],
                 'Zona': r['zona'],
-                'Paradas': r['paradas'],
+                'Edificios': r['paradas'],  # 🎯 EDIFICIOS en lugar de paradas
                 'Personas': r['personas'],
                 'Distancia_km': r['distancia'],
                 'Tiempo_min': r['tiempo'],
@@ -896,13 +858,13 @@ class CoreRouteGenerator:
                 self._log(f"Error generating summary: {str(e)}")
         
         total_routes_gen = len(self.results)
-        total_paradas = sum(r['paradas'] for r in self.results) if self.results else 0
+        total_edificios = sum(r['paradas'] for r in self.results) if self.results else 0
         total_personas = sum(r['personas'] for r in self.results) if self.results else 0
         total_distancia = sum(r['distancia'] for r in self.results) if self.results else 0
         total_tiempo = sum(r['tiempo'] for r in self.results) if self.results else 0
         
         self._log("CORE ROUTE GENERATION COMPLETED")
-        self._log(f"FINAL SUMMARY: {total_routes_gen} routes, {total_paradas} paradas, {total_personas} personas")
+        self._log(f"FINAL SUMMARY: {total_routes_gen} routes, {total_edificios} edificios, {total_personas} personas")
         return self.results
 
 # =============================================================================
@@ -911,11 +873,10 @@ class CoreRouteGenerator:
 class SistemaRutasGUI:
     def __init__(self, root):
         self.root = root
-        self.root.title("Sistema Rutas PRO Ultra HD - CON FOTOS Y AGRUPAMIENTO")
+        self.root.title("Sistema Rutas PRO - AGRUPAMIENTO POR EDIFICIO")
         self.root.geometry("1100x800")
         self.root.configure(bg='#f0f0f0')
         
-        # 🆕 API Key automática
         self.api_key = "AIzaSyBeUr2C3SDkwY7zIrYcB6agDni9XDlWrFY"
         
         self.origen_coords = "19.4283717,-99.1430307"
@@ -927,13 +888,11 @@ class SistemaRutasGUI:
         self.columnas_seleccionadas = None
         self.gestor_telegram = GestorTelegram(self)
         
-        # Variables para sincronización automática
         self.sincronizando = False
         self.sincronizacion_thread = None
         
         self.setup_ui()
         
-        # Cargar Excel automáticamente al iniciar
         self.root.after(1000, self.cargar_excel_desde_github)
 
     def setup_ui(self):
@@ -942,9 +901,9 @@ class SistemaRutasGUI:
         
         header_frame = ttk.Frame(main_frame)
         header_frame.pack(fill=tk.X, pady=(0, 20))
-        ttk.Label(header_frame, text="SISTEMA RUTAS PRO ULTRA HD - CON FOTOS Y AGRUPAMIENTO", 
+        ttk.Label(header_frame, text="SISTEMA RUTAS PRO - AGRUPAMIENTO POR EDIFICIO", 
                  font=('Arial', 14, 'bold'), foreground='#2c3e50').pack()
-        ttk.Label(header_frame, text="Gestión completa de entregas con evidencias fotográficas y agrupamiento inteligente", 
+        ttk.Label(header_frame, text="Cada edificio/institución es UNA parada en la ruta, sin importar cuántas personas tenga", 
                  font=('Arial', 10), foreground='#7f8c8d').pack()
         
         config_frame = ttk.LabelFrame(main_frame, text="Configuración", padding="15")
@@ -986,7 +945,7 @@ class SistemaRutasGUI:
         
         btn_frame = ttk.Frame(control_frame)
         btn_frame.pack(fill=tk.X)
-        self.btn_generar = ttk.Button(btn_frame, text="GENERAR RUTAS OPTIMIZADAS", command=self.generar_rutas, state='disabled')
+        self.btn_generar = ttk.Button(btn_frame, text="GENERAR RUTAS POR EDIFICIO", command=self.generar_rutas, state='disabled')
         self.btn_generar.pack(side=tk.LEFT, padx=(0, 10))
         
         ttk.Button(btn_frame, text="ABRIR CARPETA MAPAS", command=lambda: self.abrir_carpeta('mapas_pro')).pack(side=tk.LEFT, padx=(0, 10))
@@ -996,7 +955,6 @@ class SistemaRutasGUI:
         self.btn_refresh = ttk.Button(btn_frame, text="REFRESH", command=self.refresh_sistema)
         self.btn_refresh.pack(side=tk.LEFT, padx=(0, 10))
 
-        # Botones para gestión de fotos
         fotos_frame = ttk.LabelFrame(main_frame, text="Gestión de Fotos y Evidencias", padding="15")
         fotos_frame.pack(fill=tk.X, pady=(0, 10))
         
@@ -1015,13 +973,11 @@ class SistemaRutasGUI:
         ttk.Button(fotos_btn_frame, text="📊 VER ESTADO RUTAS", 
                   command=self.ver_estado_rutas).pack(side=tk.LEFT, padx=(0, 10))
 
-        # Botón de sincronización automática
         self.btn_sincronizacion_auto = ttk.Button(fotos_btn_frame, 
                                                 text="🔄 INICIAR SINCRONIZACIÓN AUTO",
                                                 command=self.toggle_sincronizacion_auto)
         self.btn_sincronizacion_auto.pack(side=tk.LEFT, padx=(0, 10))
 
-        # Botones para Telegram
         telegram_frame = ttk.Frame(control_frame)
         telegram_frame.pack(fill=tk.X, pady=(10, 0))
         
@@ -1049,12 +1005,10 @@ class SistemaRutasGUI:
     def cargar_excel_desde_github(self):
         """Cargar automáticamente el Excel de GitHub y configurar API"""
         try:
-            # Configurar API Key en la interfaz
             self.api_entry.delete(0, tk.END)
             self.api_entry.insert(0, self.api_key)
             self.log("✅ API Key de Google Maps configurada automáticamente")
             
-            # Cargar Excel automáticamente
             excel_github = "Alcaldías.xlsx"
             
             if os.path.exists(excel_github):
@@ -1067,7 +1021,6 @@ class SistemaRutasGUI:
                 
                 self.df = df_completo
                 
-                # Detección automática de columnas
                 col_direccion = self._detectar_columna_direccion(df_completo)
                 col_nombre = self._detectar_columna_nombre(df_completo) 
                 col_adscripcion = self._detectar_columna_adscripcion(df_completo)
@@ -1080,7 +1033,7 @@ class SistemaRutasGUI:
                 
                 self.btn_generar.config(state='normal')
                 self.log("🎉 ¡Sistema completamente listo!")
-                self.log("💡 Haz clic en 'GENERAR RUTAS OPTIMIZADAS'")
+                self.log("💡 Haz clic en 'GENERAR RUTAS POR EDIFICIO'")
                 
             else:
                 self.log("📝 Excel no encontrado automáticamente")
@@ -1131,7 +1084,6 @@ class SistemaRutasGUI:
                 
                 self.df = df_completo
                 
-                # Detección de columnas
                 col_direccion = self._detectar_columna_direccion(df_completo)
                 col_nombre = self._detectar_columna_nombre(df_completo) 
                 col_adscripcion = self._detectar_columna_adscripcion(df_completo)
@@ -1172,7 +1124,7 @@ class SistemaRutasGUI:
         self.procesando = True
         self.btn_generar.config(state='disabled')
         self.progress_bar.start(10)
-        self.progress_label.config(text="Generando rutas...")
+        self.progress_label.config(text="Generando rutas por edificio...")
         
         thread = threading.Thread(target=self._procesar_rutas)
         thread.daemon = True
@@ -1180,16 +1132,13 @@ class SistemaRutasGUI:
 
     def _procesar_rutas(self):
         try:
-            self.log("🚀 INICIANDO GENERACIÓN DE RUTAS CON AGRUPAMIENTO...")
+            self.log("🚀 INICIANDO GENERACIÓN DE RUTAS POR EDIFICIO...")
             
-            # Limpiar carpetas
             self._limpiar_carpetas_anteriores()
             
-            # Cargar datos
             df_completo = pd.read_excel(self.archivo_excel)
             self.log(f"📊 Total de registros: {len(df_completo)}")
             
-            # Usar todos los registros
             df_filtrado = df_completo
             self.log(f"✅ Procesando TODOS los registros: {len(df_filtrado)}")
             
@@ -1197,20 +1146,17 @@ class SistemaRutasGUI:
                 self.log("❌ No hay datos")
                 return
             
-            # Usar columnas guardadas
             if hasattr(self, 'columnas_seleccionadas') and self.columnas_seleccionadas:
                 columna_direccion = self.columnas_seleccionadas['direccion']
                 columna_nombre = self.columnas_seleccionadas['nombre']
                 columna_adscripcion = self.columnas_seleccionadas['adscripcion']
             else:
-                # Fallback a detección automática
                 columna_direccion = self._detectar_columna_direccion(df_filtrado)
                 columna_nombre = self._detectar_columna_nombre(df_filtrado)
                 columna_adscripcion = self._detectar_columna_adscripcion(df_filtrado)
             
             self.log(f"🎯 Usando columnas - Dirección: '{columna_direccion}', Nombre: '{columna_nombre}'")
             
-            # Estandarizar
             df_estandar = df_filtrado.copy()
             df_estandar['DIRECCIÓN'] = df_filtrado[columna_direccion].astype(str)
             df_estandar['NOMBRE'] = df_filtrado[columna_nombre].astype(str) if columna_nombre else 'Sin nombre'
@@ -1218,7 +1164,6 @@ class SistemaRutasGUI:
             
             self.log(f"🎯 Procesando {len(df_estandar)} registros...")
             
-            # Generar rutas
             generator = CoreRouteGenerator(
                 df=df_estandar,
                 api_key=self.api_key,
@@ -1231,9 +1176,9 @@ class SistemaRutasGUI:
             resultados = generator.generate_routes()
             
             if resultados:
-                self.log(f"🎉 ¡{len(resultados)} RUTAS GENERADAS CON AGRUPAMIENTO!")
+                self.log(f"🎉 ¡{len(resultados)} RUTAS GENERADAS POR EDIFICIO!")
                 self.log("📱 Las rutas están listas para asignar a repartidores via Telegram")
-                messagebox.showinfo("Éxito", f"¡{len(resultados)} rutas generadas!\n\nAhora puedes asignarlas a repartidores usando el botón 'ASIGNAR RUTAS'")
+                messagebox.showinfo("Éxito", f"¡{len(resultados)} rutas generadas!\n\nCada edificio es una parada, sin importar cuántas personas tenga.")
             else:
                 self.log("❌ No se pudieron generar rutas")
                 
@@ -1311,7 +1256,6 @@ class SistemaRutasGUI:
             self.btn_generar.config(state='disabled')
             messagebox.showinfo("Listo", "¡Todo limpio!")
 
-    # Métodos para Telegram (se mantienen igual)
     def asignar_rutas_telegram(self):
         """Interfaz para asignar rutas a repartidores"""
         rutas_pendientes = self.gestor_telegram.obtener_rutas_pendientes()
@@ -1396,14 +1340,14 @@ class SistemaRutasGUI:
                 zona = ruta_data.get('zona')
                 estado = ruta_data.get('estado', 'desconocido')
                 repartidor = ruta_data.get('repartidor_asignado', 'Sin asignar')
-                paradas_totales = len(ruta_data.get('paradas', []))
-                paradas_entregadas = len([p for p in ruta_data.get('paradas', []) 
+                edificios_totales = len(ruta_data.get('paradas', []))
+                edificios_entregados = len([p for p in ruta_data.get('paradas', []) 
                                         if p.get('estado') == 'entregado'])
                 
                 icono = "🟢" if estado == 'completada' else "🟡" if estado == 'en_progreso' else "🔴"
                 
                 self.log(f"   {icono} Ruta {ruta_id} ({zona}): {estado.upper()}")
-                self.log(f"     👤 {repartidor} | 📦 {paradas_entregadas}/{paradas_totales} entregas")
+                self.log(f"     👤 {repartidor} | 🏢 {edificios_entregados}/{edificios_totales} edificios")
                 
             except Exception as e:
                 self.log(f"   ❌ Error leyendo {archivo}: {str(e)}")
@@ -1653,7 +1597,6 @@ class SistemaRutasGUI:
 # EJECUCIÓN PRINCIPAL
 # =============================================================================
 if __name__ == "__main__":
-    # Crear todas las carpetas necesarias
     carpetas = ['mapas_pro', 'rutas_excel', 'rutas_telegram', 'avances_ruta', 
                 'incidencias_trafico', 'fotos_acuses', 'fotos_entregas', 'fotos_reportes']
     for carpeta in carpetas:
