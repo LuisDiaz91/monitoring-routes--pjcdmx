@@ -1305,7 +1305,7 @@ def recibir_rutas_desde_programa():
         print(f"❌ Error en API /api/rutas: {e}")
         return jsonify({"error": str(e)}), 500
 
-# 🆕 PEGA AQUÍ LA FUNCIÓN DEBUG
+# 🆕 DEBUG RUTAS - VERSIÓN CORREGIDA
 @app.route('/api/debug_rutas', methods=['GET'])
 def debug_rutas():
     """Endpoint para debug de rutas"""
@@ -1337,14 +1337,14 @@ def debug_rutas():
             "status": "success",
             "rutas_en_sistema": rutas_en_sistema,
             "rutas_disponibles": len(RUTAS_DISPONIBLES),
-            "rutas_cargadas': RUTAS_DISPONIBLES,  # 🚨 CORREGIR ESTA LÍNEA - QUITAR LA COMA EXTRA
+            "rutas_cargadas": len(RUTAS_DISPONIBLES),
             "timestamp": datetime.now().isoformat()
         })
         
     except Exception as e:
         return jsonify({"status": "error", "error": str(e)}), 500
 
-# 🆕 TAMBIÉN AGREGAR ESTE ENDPOINT PARA RECARGAR
+# 🆕 RECARGAR RUTAS MANUAL
 @app.route('/api/recargar_rutas', methods=['POST'])
 def recargar_rutas_manual():
     """Forzar recarga de rutas"""
