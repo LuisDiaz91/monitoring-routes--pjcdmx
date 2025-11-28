@@ -171,26 +171,17 @@ def cargar_rutas_disponibles():
                     with open(f'rutas_telegram/{archivo}', 'r', encoding='utf-8') as f:
                         ruta = json.load(f)
                     
-                    # 🆕 FILTRO: Solo rutas de HOY
-                    fecha_creacion = ruta.get('timestamp_creacion', '')
-                    if fecha_creacion:
-                        fecha_obj = datetime.fromisoformat(fecha_creacion.replace('Z', '+00:00'))
-                        hoy = datetime.now()
-                        
-                        # Solo rutas creadas hoy
-                        if fecha_obj.date() == hoy.date():
-                            if ruta.get('estado') == 'pendiente':
-                                RUTAS_DISPONIBLES.append(ruta)
-                    else:
-                        # Si no tiene fecha, asumir que es vieja y no incluirla
-                        pass
+                    # 🆕 ELIMINAR FILTRO DE FECHA - ACEPTAR TODAS LAS RUTAS
+                    if ruta.get('estado') == 'pendiente':
+                        RUTAS_DISPONIBLES.append(ruta)
+                        print(f"✅ Ruta cargada: {ruta['ruta_id']} - {ruta['zona']} ({len(ruta['paradas'])} paradas)")
                         
                 except Exception as e:
                     print(f"❌ Error cargando ruta {archivo}: {e}")
     
-    print(f"🔄 Rutas de HOY cargadas: {len(RUTAS_DISPONIBLES)}")
+    print(f"🔄 Todas las rutas cargadas: {len(RUTAS_DISPONIBLES)}")
     return len(RUTAS_DISPONIBLES)
-
+    
 def formatear_ruta_para_repartidor(ruta):
     """Formatear ruta de manera SEGURA (sin Markdown problemático)"""
     try:
@@ -391,7 +382,8 @@ def inicializar_sistema_completo():
         'rutas_telegram', 
         'avances_ruta', 
         'incidencias_trafico',
-        'avances_procesados'  # 🆕 Carpeta para avances procesados
+        'avances_procesados',
+        'rutas_excel'  # 🆕 CARPETA CRÍTICA QUE FALTABA
     ]
     
     for carpeta in carpetas_necesarias:
@@ -1313,6 +1305,63 @@ def recibir_rutas_desde_programa():
         print(f"❌ Error en API /api/rutas: {e}")
         return jsonify({"error": str(e)}), 500
 
+# 🆕 PEGA AQUÍ LA FUNCIÓN DEBUG
+@app.route('/api/debug_rutas', methods=['GET'])
+def debug_rutas():
+    """Endpoint para debug de rutas"""
+    try:
+        rutas_en_sistema = []
+        
+        if os.path.exists('rutas_telegram'):
+            for archivo in os.listdir('rutas_telegram'):
+                if archivo.endswith('.json'):
+                    try:
+                        with open(f'rutas_telegram/{archivo}', 'r', encoding='utf-8') as f:
+                            ruta = json.load(f)
+                        
+                        rutas_en_sistema.append({
+                            'archivo': archivo,
+                            'ruta_id': ruta.get('ruta_id'),
+                            'zona': ruta.get('zona'),
+                            'estado': ruta.get('estado'),
+                            'paradas': len(ruta.get('paradas', [])),
+                            'timestamp_creacion': ruta.get('timestamp_creacion')
+                        })
+                    except Exception as e:
+                        rutas_en_sistema.append({
+                            'archivo': archivo,
+                            'error': str(e)
+                        })
+        
+        return jsonify({
+            "status": "success",
+            "rutas_en_sistema": rutas_en_sistema,
+            "rutas_disponibles": len(RUTAS_DISPONIBLES),
+            "rutas_cargadas': RUTAS_DISPONIBLES,  # 🚨 CORREGIR ESTA LÍNEA - QUITAR LA COMA EXTRA
+            "timestamp": datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        return jsonify({"status": "error", "error": str(e)}), 500
+
+# 🆕 TAMBIÉN AGREGAR ESTE ENDPOINT PARA RECARGAR
+@app.route('/api/recargar_rutas', methods=['POST'])
+def recargar_rutas_manual():
+    """Forzar recarga de rutas"""
+    try:
+        rutas_cargadas = cargar_rutas_disponibles()
+        
+        return jsonify({
+            "status": "success",
+            "rutas_cargadas": rutas_cargadas,
+            "rutas_disponibles": len(RUTAS_DISPONIBLES),
+            "timestamp": datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        return jsonify({"status": "error", "error": str(e)}), 500
+
+# Y LUEGO SIGUE EL WEBHOOK NORMAL
 @app.route('/webhook', methods=['POST', 'GET'])
 def webhook():
     if request.method == 'POST':
