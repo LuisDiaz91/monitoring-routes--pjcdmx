@@ -318,7 +318,7 @@ class GestorTelegram:
             return False
 
 # =============================================================================
-# CLASE PRINCIPAL - MOTOR DE RUTAS (CoreRouteGenerator) - MEJORADO CON AGRUPAMIENTO POR EDIFICIOS
+# CLASE PRINCIPAL - MOTOR DE RUTAS (CoreRouteGenerator) - VERSIÓN MEJORADA SIN RUTAS DE 1 PERSONA
 # =============================================================================
 class CoreRouteGenerator:
     def __init__(self, df, api_key, origen_coords, origen_name, max_stops_per_route):
@@ -340,11 +340,11 @@ class CoreRouteGenerator:
                 self.GEOCODE_CACHE = {}
         self.COLORES = {
             'CENTRO': '#FF6B6B', 'SUR': '#4ECDC4', 'ORIENTE': '#45B7D1',
-            'SUR_ORIENTE': '#96CEB4', 'OTRAS': '#FECA57'
+            'SUR_ORIENTE': '#96CEB4', 'OTRAS': '#FECA57', 'MIXTA': '#9B59B6'
         }
         self.ICONOS = {
             'CENTRO': 'building', 'SUR': 'home', 'ORIENTE': 'industry',
-            'SUR_ORIENTE': 'tree', 'OTRAS': 'map-marker'
+            'SUR_ORIENTE': 'tree', 'OTRAS': 'map-marker', 'MIXTA': 'star'
         }
         self._log("CoreRouteGenerator initialized successfully.")
 
@@ -809,9 +809,140 @@ class CoreRouteGenerator:
             'telegram_file': telegram_file
         }
 
+    # 🆕 MÉTODOS NUEVOS PARA EVITAR RUTAS DE 1 PERSONA
+    def _identificar_personas_sueltas(self, subgrupos):
+        """Identificar personas que quedarían solas en rutas"""
+        personas_sueltas = []
+        subgrupos_filtrados = {}
+        
+        for zona, grupos in subgrupos.items():
+            subgrupos_filtrados[zona] = []
+            for grupo in grupos:
+                if len(grupo) == 1:
+                    # Esta persona quedaría sola, la guardamos para redistribuir
+                    personas_sueltas.append({
+                        'indice': grupo[0],
+                        'zona': zona,
+                        'datos': self.df.loc[grupo[0]]
+                    })
+                else:
+                    # Grupo normal, lo mantenemos
+                    subgrupos_filtrados[zona].append(grupo)
+        
+        self._log(f"🎯 Identificadas {len(personas_sueltas)} personas sueltas para redistribución")
+        return subgrupos_filtrados, personas_sueltas
+
+    def _redistribuir_personas_sueltas(self, subgrupos_filtrados, personas_sueltas):
+        """Redistribuir personas sueltas en grupos existentes"""
+        personas_redistribuidas = 0
+        personas_para_rutas_mixtas = []
+        
+        for persona in personas_sueltas:
+            redistribuida = False
+            
+            # Intentar agregar a grupos de la misma zona con espacio
+            zona = persona['zona']
+            if zona in subgrupos_filtrados and subgrupos_filtrados[zona]:
+                for i, grupo in enumerate(subgrupos_filtrados[zona]):
+                    if len(grupo) < self.max_stops_per_route:
+                        # Hay espacio en este grupo, agregar la persona
+                        grupo.append(persona['indice'])
+                        redistribuida = True
+                        personas_redistribuidas += 1
+                        self._log(f"🔄 Persona suelta agregada a grupo existente en {zona}")
+                        break
+            
+            if not redistribuida:
+                # No se pudo redistribuir, guardar para rutas mixtas
+                personas_para_rutas_mixtas.append(persona)
+        
+        self._log(f"✅ {personas_redistribuidas} personas redistribuidas en grupos existentes")
+        self._log(f"📦 {len(personas_para_rutas_mixtas)} personas para rutas mixtas")
+        
+        return subgrupos_filtrados, personas_para_rutas_mixtas
+
+    def _crear_rutas_mixtas(self, personas_para_rutas_mixtas):
+        """Crear rutas mixtas con personas de diferentes zonas"""
+        if not personas_para_rutas_mixtas:
+            return []
+        
+        rutas_mixtas = []
+        
+        # Agrupar personas por proximidad geográfica
+        grupos_mixtos = self._agrupar_por_proximidad_mixta(personas_para_rutas_mixtas)
+        
+        for i, grupo in enumerate(grupos_mixtos, 1):
+            if len(grupo) >= 2:  # Mínimo 2 personas por ruta mixta
+                indices_grupo = [p['indice'] for p in grupo]
+                ruta_mixta = self._crear_ruta_archivos("MIXTA", indices_grupo, f"{len(self.results) + i}_MIXTA")
+                if ruta_mixta:
+                    rutas_mixtas.append(ruta_mixta)
+                    self._log(f"🎪 Ruta mixta creada: {len(grupo)} personas de diferentes zonas")
+        
+        return rutas_mixtas
+
+    def _agrupar_por_proximidad_mixta(self, personas_para_rutas_mixtas):
+        """Agrupar personas de diferentes zonas por proximidad geográfica"""
+        grupos = []
+        
+        for persona in personas_para_rutas_mixtas:
+            direccion = str(persona['datos'].get('DIRECCIÓN', ''))
+            coords = self._geocode(direccion)
+            
+            if not coords:
+                continue
+                
+            persona['coords'] = coords
+            agregada = False
+            
+            # Buscar grupo cercano
+            for grupo in grupos:
+                if self._esta_cerca_de_grupo(persona, grupo):
+                    grupo.append(persona)
+                    agregada = True
+                    break
+            
+            if not agregada:
+                # Crear nuevo grupo
+                grupos.append([persona])
+        
+        # Combinar grupos pequeños
+        grupos_combinados = self._combinar_grupos_pequenos(grupos)
+        
+        self._log(f"📍 Agrupadas {len(personas_para_rutas_mixtas)} personas en {len(grupos_combinados)} grupos mixtos")
+        return grupos_combinados
+
+    def _esta_cerca_de_grupo(self, persona, grupo, distancia_maxima_km=5):
+        """Verificar si una persona está cerca de un grupo existente"""
+        for miembro in grupo:
+            if self._calcular_distancia(persona['coords'], miembro['coords']) <= distancia_maxima_km:
+                return True
+        return False
+
+    def _combinar_grupos_pequenos(self, grupos, tamaño_minimo=2):
+        """Combinar grupos pequeños para crear rutas eficientes"""
+        grupos_combinados = []
+        grupo_actual = []
+        
+        for grupo in sorted(grupos, key=len, reverse=True):
+            if len(grupo_actual) + len(grupo) <= self.max_stops_per_route:
+                grupo_actual.extend(grupo)
+            else:
+                if len(grupo_actual) >= tamaño_minimo:
+                    grupos_combinados.append(grupo_actual)
+                grupo_actual = grupo.copy()
+        
+        # Agregar el último grupo si cumple con el tamaño mínimo
+        if len(grupo_actual) >= tamaño_minimo:
+            grupos_combinados.append(grupo_actual)
+        
+        return grupos_combinados
+
     def generate_routes(self):
-        self._log("Starting Core Route Generation Process")
+        """🎯 VERSIÓN MEJORADA - EVITA RUTAS DE 1 PERSONA"""
+        self._log("🚀 INICIANDO GENERACIÓN DE RUTAS OPTIMIZADAS - SIN RUTAS DE 1 PERSONA")
         self._log(f"Initial data records: {len(self.df)}")
+        
         if self.df.empty:
             self._log("No data to process.")
             return []
@@ -873,20 +1004,28 @@ class CoreRouteGenerator:
         
         df_clean['Zona'] = df_clean['Alcaldia'].apply(asignar_zona)
         
+        # 🎯 FASE 1: CREAR SUBGRUPOS INICIALES
         subgrupos = {}
         for zona in df_clean['Zona'].unique():
             dirs = df_clean[df_clean['Zona'] == zona].index.tolist()
             subgrupos[zona] = [dirs[i:i+self.max_stops_per_route] for i in range(0, len(dirs), self.max_stops_per_route)]
             self._log(f"{zona}: {len(dirs)} addresses to {len(subgrupos[zona])} routes")
         
-        self._log("Generating Optimized Routes...")
+        # 🎯 FASE 2: IDENTIFICAR Y REDISTRIBUIR PERSONAS SUELTAS
+        self._log("🔄 Fase 2: Identificando y redistribuyendo personas sueltas...")
+        subgrupos_filtrados, personas_sueltas = self._identificar_personas_sueltas(subgrupos)
+        
+        # 🎯 FASE 3: REDISTRIBUIR PERSONAS SUELTAS
+        subgrupos_optimizados, personas_para_mixtas = self._redistribuir_personas_sueltas(subgrupos_filtrados, personas_sueltas)
+        
+        # 🎯 FASE 4: GENERAR RUTAS PRINCIPALES
+        self._log("🔄 Fase 4: Generando rutas principales...")
         self.results = []
         ruta_id = 1
-        total_routes_to_process = sum(len(grupos) for grupos in subgrupos.values())
         
-        for zona in subgrupos.keys():
-            for i, grupo in enumerate(subgrupos[zona]):
-                self._log(f"Processing Route {ruta_id} of {total_routes_to_process}: {zona}")
+        for zona in subgrupos_optimizados.keys():
+            for i, grupo in enumerate(subgrupos_optimizados[zona]):
+                self._log(f"Processing Route {ruta_id}: {zona} ({len(grupo)} personas)")
                 try:
                     result = self._crear_ruta_archivos(zona, grupo, ruta_id)
                     if result:
@@ -895,6 +1034,13 @@ class CoreRouteGenerator:
                     self._log(f"Error in route {ruta_id}: {str(e)}")
                 ruta_id += 1
         
+        # 🎯 FASE 5: CREAR RUTAS MIXTAS CON PERSONAS SOBRANTES
+        if personas_para_mixtas:
+            self._log("🔄 Fase 5: Creando rutas mixtas con personas sobrantes...")
+            rutas_mixtas = self._crear_rutas_mixtas(personas_para_mixtas)
+            self.results.extend(rutas_mixtas)
+        
+        # 🎯 GUARDAR CACHE Y GENERAR RESUMEN
         try:
             with open(self.CACHE_FILE, 'w') as f:
                 json.dump(self.GEOCODE_CACHE, f)
@@ -919,16 +1065,34 @@ class CoreRouteGenerator:
             except Exception as e:
                 self._log(f"Error generating summary: {str(e)}")
         
+        # 🎯 ESTADÍSTICAS FINALES MEJORADAS
         total_routes_gen = len(self.results)
         total_paradas = sum(r['paradas'] for r in self.results) if self.results else 0
         total_personas = sum(r['personas'] for r in self.results) if self.results else 0
         total_distancia = sum(r['distancia'] for r in self.results) if self.results else 0
         total_tiempo = sum(r['tiempo'] for r in self.results) if self.results else 0
         
-        self._log("CORE ROUTE GENERATION COMPLETED")
-        self._log(f"FINAL SUMMARY: {total_routes_gen} routes, {total_paradas} paradas, {total_personas} personas")
+        rutas_mixtas_count = len([r for r in self.results if 'MIXTA' in str(r['ruta_id'])])
+        
+        self._log("🎉 GENERACIÓN DE RUTAS OPTIMIZADA COMPLETADA")
+        self._log(f"📊 RESUMEN FINAL:")
+        self._log(f"   • Total rutas: {total_routes_gen}")
+        self._log(f"   • Rutas mixtas: {rutas_mixtas_count}")
+        self._log(f"   • Total paradas (edificios): {total_paradas}")
+        self._log(f"   • Total personas: {total_personas}")
+        self._log(f"   • Distancia total: {total_distancia} km")
+        self._log(f"   • Tiempo total: {total_tiempo} min")
+        self._log(f"   • Personas por ruta promedio: {total_personas/total_routes_gen:.1f}" if total_routes_gen > 0 else "0")
+        
+        # 🎯 VERIFICAR QUE NO HAY RUTAS DE 1 PERSONA
+        rutas_una_persona = [r for r in self.results if r['personas'] == 1]
+        if rutas_una_persona:
+            self._log(f"⚠️ ADVERTENCIA: Se crearon {len(rutas_una_persona)} rutas con 1 persona")
+        else:
+            self._log("✅ EXCELENTE: ¡Cero rutas con 1 persona creadas!")
+        
         return self.results
-
+        
 # =============================================================================
 # CLASE INTERFAZ GRÁFICA (SistemaRutasGUI) - VERSIÓN FINAL
 # =============================================================================
