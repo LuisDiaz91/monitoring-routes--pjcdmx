@@ -252,16 +252,18 @@ def formatear_ruta_para_repartidor(ruta):
         return f"🗺️ Ruta {ruta['ruta_id']} - {ruta['zona']} ({len(ruta['paradas'])} paradas)"
         
 def formatear_lista_completa(ruta):
-    """Formatear lista completa de personas de manera SEGURA"""
+    """Formatear lista completa de personas de manera SEGURA - VERSIÓN MEJORADA"""
     try:
         texto = f"👥 **LISTA COMPLETA - RUTA {ruta['ruta_id']}**\n\n"
         texto += f"📍 Zona: {ruta['zona']}\n"
         texto += f"📊 Total de personas: {len(ruta['paradas'])}\n\n"
         
         entregadas = 0
-        for i, parada in enumerate(ruta['paradas'], 1):
+        
+        for parada in ruta['paradas']:
             estado = "✅" if parada.get('estado') == 'entregado' else "📍"
-            # Limpieza segura del texto
+            
+            # 🆕 LIMPIEZA SEGURA EXTRA PARA EVITAR PROBLEMAS
             nombre_limpio = limpiar_texto_markdown(parada['nombre'])
             dependencia_limpia = limpiar_texto_markdown(parada.get('dependencia', 'N/A'))
             direccion_limpia = limpiar_texto_markdown(parada.get('direccion', 'N/A')[:30])
@@ -272,7 +274,9 @@ def formatear_lista_completa(ruta):
             
             if parada.get('estado') == 'entregado':
                 entregadas += 1
-                texto += f"   🕒 {parada.get('timestamp_entrega', '')[:16]}\n"
+                timestamp = parada.get('timestamp_entrega', '')
+                if timestamp:
+                    texto += f"   🕒 {timestamp[:16]}\n"
             
             texto += "\n"
         
@@ -282,7 +286,8 @@ def formatear_lista_completa(ruta):
         
     except Exception as e:
         print(f"❌ Error formateando lista completa: {e}")
-        return f"❌ Error al generar la lista completa: {str(e)}"
+        # 🆕 FALLBACK SEGURO
+        return f"👥 LISTA COMPLETA - Ruta {ruta.get('ruta_id', 'N/A')}\n\nError al generar lista: {str(e)}"
         
 def registrar_avance_pendiente(datos_avance):
     """🆕 Registrar un nuevo avance pendiente - VERSIÓN MEJORADA"""
@@ -1326,99 +1331,154 @@ def manejar_callback_incidencia(call):
         bot.answer_callback_query(call.id, "❌ Error al procesar incidencia")
 
 def manejar_callback_lista_completa(call):
-    """Manejar clic en botón 'Ver Lista Completa'"""
+    """Manejar clic en botón 'Ver Lista Completa' - VERSIÓN CORREGIDA"""
     try:
-        # Extraer ruta_id del callback data (ej: "lista_completa_5")
+        # 🆕 CORRECCIÓN: Extraer ruta_id correctamente
+        # El formato es "lista_completa_5" -> ["lista", "completa", "5"]
         partes = call.data.split('_')
-        if len(partes) >= 3:
-            ruta_id = partes[2]
-        else:
-            ruta_id = "desconocida"
+        ruta_id = partes[2] if len(partes) >= 3 else "desconocida"
         
         user_id = call.from_user.id
         
+        print(f"📋 Solicitando lista completa de Ruta {ruta_id} por {call.from_user.first_name}")
+        
         # Buscar la ruta
+        ruta_encontrada = None
         for archivo in os.listdir('rutas_telegram'):
             if f"Ruta_{ruta_id}_" in archivo:
-                with open(f'rutas_telegram/{archivo}', 'r', encoding='utf-8') as f:
-                    ruta = json.load(f)
-                
-                mensaje = formatear_lista_completa(ruta)
-                
-                # Crear teclado con opciones
-                markup = types.InlineKeyboardMarkup()
-                markup.row(
-                    types.InlineKeyboardButton("📦 Registrar entrega", callback_data=f"entregar_{ruta_id}"),
-                    types.InlineKeyboardButton("🗺️ Abrir Maps", url=ruta['google_maps_url'])
-                )
-                markup.row(
-                    types.InlineKeyboardButton("📊 Volver al resumen", callback_data=f"volver_resumen_{ruta_id}"),
-                    types.InlineKeyboardButton("❌ Cerrar", callback_data="cancelar")
-                )
-                
-                bot.edit_message_text(
-                    chat_id=call.message.chat.id,
-                    message_id=call.message.message_id,
-                    text=mensaje,
-                    parse_mode='Markdown',
-                    reply_markup=markup
-                )
-                
-                bot.answer_callback_query(call.id, "👥 Mostrando lista completa...")
-                return
+                try:
+                    with open(f'rutas_telegram/{archivo}', 'r', encoding='utf-8') as f:
+                        ruta_encontrada = json.load(f)
+                    break
+                except Exception as e:
+                    print(f"❌ Error leyendo ruta {archivo}: {e}")
+                    continue
         
-        bot.answer_callback_query(call.id, "❌ No se encontró la ruta")
+        if not ruta_encontrada:
+            bot.answer_callback_query(call.id, "❌ No se encontró la ruta")
+            return
+        
+        # 🆕 USAR LA FUNCIÓN SEGURA SIN MARKDOWN
+        mensaje = formatear_lista_completa(ruta_encontrada)
+        
+        # Crear teclado con opciones
+        markup = types.InlineKeyboardMarkup()
+        markup.row(
+            types.InlineKeyboardButton("📦 Registrar entrega", callback_data=f"entregar_{ruta_id}"),
+            types.InlineKeyboardButton("🗺️ Abrir Maps", url=ruta_encontrada['google_maps_url'])
+        )
+        markup.row(
+            types.InlineKeyboardButton("📊 Volver al resumen", callback_data=f"volver_resumen_{ruta_id}"),
+            types.InlineKeyboardButton("❌ Cerrar", callback_data="cancelar")
+        )
+        
+        # 🆕 MANEJO SEGURO DE MARKDOWN
+        try:
+            bot.edit_message_text(
+                chat_id=call.message.chat.id,
+                message_id=call.message.message_id,
+                text=mensaje,
+                parse_mode='Markdown',
+                reply_markup=markup
+            )
+        except Exception as e:
+            print(f"⚠️ Error con Markdown, enviando sin formato: {e}")
+            # Enviar sin Markdown como fallback
+            mensaje_simple = f"👥 LISTA COMPLETA - Ruta {ruta_id}\n\n"
+            mensaje_simple += f"📍 Zona: {ruta_encontrada['zona']}\n"
+            mensaje_simple += f"📊 Total: {len(ruta_encontrada['paradas'])} personas\n\n"
+            
+            for i, parada in enumerate(ruta_encontrada['paradas'][:5], 1):
+                estado = "✅" if parada.get('estado') == 'entregado' else "📍"
+                mensaje_simple += f"{estado} {parada['orden']}. {parada['nombre']}\n"
+            
+            if len(ruta_encontrada['paradas']) > 5:
+                mensaje_simple += f"\n... y {len(ruta_encontrada['paradas']) - 5} más"
+            
+            bot.edit_message_text(
+                chat_id=call.message.chat.id,
+                message_id=call.message.message_id,
+                text=mensaje_simple,
+                parse_mode=None,
+                reply_markup=markup
+            )
+        
+        bot.answer_callback_query(call.id, "👥 Mostrando lista completa...")
         
     except Exception as e:
         print(f"❌ Error en lista completa callback: {e}")
         bot.answer_callback_query(call.id, "❌ Error al mostrar lista")
 
 def manejar_callback_volver_resumen(call):
-    """Manejar clic en botón 'Volver al resumen'"""
+    """Manejar clic en botón 'Volver al resumen' - VERSIÓN CORREGIDA"""
     try:
-        # Extraer ruta_id del callback data (ej: "volver_resumen_5")
+        # 🆕 CORRECCIÓN: Extraer ruta_id correctamente
         partes = call.data.split('_')
-        if len(partes) >= 3:
-            ruta_id = partes[2]
-        else:
-            ruta_id = "desconocida"
+        ruta_id = partes[2] if len(partes) >= 3 else "desconocida"
         
         user_id = call.from_user.id
         
+        print(f"📋 Volviendo al resumen de Ruta {ruta_id}")
+        
         # Buscar la ruta
+        ruta_encontrada = None
         for archivo in os.listdir('rutas_telegram'):
             if f"Ruta_{ruta_id}_" in archivo:
-                with open(f'rutas_telegram/{archivo}', 'r', encoding='utf-8') as f:
-                    ruta = json.load(f)
-                
-                mensaje = formatear_ruta_para_repartidor(ruta)
-                
-                markup = types.InlineKeyboardMarkup()
-                markup.row(
-                    types.InlineKeyboardButton("🗺️ Abrir en Maps", url=ruta['google_maps_url']),
-                    types.InlineKeyboardButton("👥 Ver Lista Completa", callback_data=f"lista_completa_{ruta_id}")
-                )
-                markup.row(
-                    types.InlineKeyboardButton("📦 Entregar", callback_data=f"entregar_{ruta_id}"),
-                    types.InlineKeyboardButton("📊 Estatus", callback_data=f"estatus_{ruta_id}")
-                )
-                markup.row(
-                    types.InlineKeyboardButton("📍 Ubicación", callback_data="nueva_ubicacion"),
-                    types.InlineKeyboardButton("🚨 Incidencia", callback_data=f"incidencia_{ruta_id}")
-                )
-                
-                bot.edit_message_text(
-                    chat_id=call.message.chat.id,
-                    message_id=call.message.message_id,
-                    text=mensaje,
-                    parse_mode='Markdown',
-                    reply_markup=markup
-                )
-                
-                bot.answer_callback_query(call.id, "📋 Volviendo al resumen...")
-                return
+                try:
+                    with open(f'rutas_telegram/{archivo}', 'r', encoding='utf-8') as f:
+                        ruta_encontrada = json.load(f)
+                    break
+                except Exception as e:
+                    print(f"❌ Error leyendo ruta {archivo}: {e}")
+                    continue
         
-        bot.answer_callback_query(call.id, "❌ No se encontró la ruta")
+        if not ruta_encontrada:
+            bot.answer_callback_query(call.id, "❌ No se encontró la ruta")
+            return
+        
+        mensaje = formatear_ruta_para_repartidor(ruta_encontrada)
+        
+        markup = types.InlineKeyboardMarkup()
+        markup.row(
+            types.InlineKeyboardButton("🗺️ Abrir en Maps", url=ruta_encontrada['google_maps_url']),
+            types.InlineKeyboardButton("👥 Ver Lista Completa", callback_data=f"lista_completa_{ruta_id}")
+        )
+        markup.row(
+            types.InlineKeyboardButton("📦 Entregar", callback_data=f"entregar_{ruta_id}"),
+            types.InlineKeyboardButton("📊 Estatus", callback_data=f"estatus_{ruta_id}")
+        )
+        markup.row(
+            types.InlineKeyboardButton("📍 Ubicación", callback_data="nueva_ubicacion"),
+            types.InlineKeyboardButton("🚨 Incidencia", callback_data=f"incidencia_{ruta_id}")
+        )
+        
+        # 🆕 MANEJO SEGURO DE MARKDOWN
+        try:
+            bot.edit_message_text(
+                chat_id=call.message.chat.id,
+                message_id=call.message.message_id,
+                text=mensaje,
+                parse_mode='Markdown',
+                reply_markup=markup
+            )
+        except Exception as e:
+            print(f"⚠️ Error con Markdown, enviando sin formato: {e}")
+            mensaje_simple = f"🗺️ RUTA {ruta_id}\n\n"
+            mensaje_simple += f"📍 {ruta_encontrada['zona']}\n"
+            mensaje_simple += f"📦 {len(ruta_encontrada['paradas'])} paradas\n"
+            mensaje_simple += f"📏 {ruta_encontrada['estadisticas']['distancia_km']} km\n"
+            mensaje_simple += f"⏱️ {ruta_encontrada['estadisticas']['tiempo_min']} min\n\n"
+            mensaje_simple += "🚀 Usa los botones para navegar"
+            
+            bot.edit_message_text(
+                chat_id=call.message.chat.id,
+                message_id=call.message.message_id,
+                text=mensaje_simple,
+                parse_mode=None,
+                reply_markup=markup
+            )
+        
+        bot.answer_callback_query(call.id, "📋 Volviendo al resumen...")
         
     except Exception as e:
         print(f"❌ Error en volver resumen callback: {e}")
