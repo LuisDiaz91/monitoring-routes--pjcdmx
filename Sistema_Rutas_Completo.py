@@ -1,4 +1,3 @@
-# sistema_rutas_completo_agrupamiento_edificios.py
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, scrolledtext
 import pandas as pd
@@ -301,7 +300,7 @@ class GestorTelegram:
             return False
 
 # =============================================================================
-# CLASE PRINCIPAL - MOTOR DE RUTAS CON AGRUPAMIENTO POR EDIFICIO
+# CLASE PRINCIPAL - MOTOR DE RUTAS CON MÍNIMO 4 EDIFICIOS
 # =============================================================================
 class CoreRouteGenerator:
     def __init__(self, df, api_key, origen_coords, origen_name, max_stops_per_route):
@@ -418,7 +417,7 @@ class CoreRouteGenerator:
         return R * c
 
     def _agrupar_por_edificio(self, filas):
-        """🎯 NUEVO: Agrupa por edificio/institución - CADA EDIFICIO ES UNA PARADA"""
+        """🎯 Agrupa por edificio/institución - CADA EDIFICIO ES UNA PARADA"""
         grupos = {}
         
         for _, fila in filas.iterrows():
@@ -490,7 +489,21 @@ class CoreRouteGenerator:
                 'coordenadas': coords,
                 'personas': grupo_filas,
                 'cantidad_personas': len(grupo_filas),
-                'es_edificio': True  # 🆕 TODOS son edificios ahora
+                'es_edificio': True
+            })
+        
+        # 🆕 CORRECCIÓN: Si hay menos de 2 edificios, agregar origen como waypoint adicional
+        if len(coords_list) < 2:
+            self._log("⚠️ Pocos edificios en ruta - agregando origen como waypoint adicional")
+            origen_coords = tuple(map(float, self.origen_coords.split(',')))
+            coords_list.append(origen_coords)
+            # Agregar un grupo ficticio para el origen
+            filas_agrupadas.append({
+                'coordenadas': origen_coords,
+                'personas': [],
+                'cantidad_personas': 0,
+                'es_edificio': False,
+                'es_origen_adicional': True
             })
         
         if len(coords_list) < 2:
@@ -515,11 +528,17 @@ class CoreRouteGenerator:
                 dist = sum(leg['distance']['value'] for leg in route['legs']) / 1000
                 tiempo = sum(leg['duration']['value'] for leg in route['legs']) / 60
                 
-                # Reordenar según optimización
-                filas_opt = [filas_agrupadas[i] for i in orden]
-                coords_opt = [coords_list[i] for i in orden]
+                # 🆕 FILTRAR waypoints que son el origen adicional
+                filas_finales = []
+                coords_finales = []
                 
-                return filas_opt, coords_opt, tiempo, dist, poly
+                for i in orden:
+                    # Si no es el origen adicional, agregar a la lista final
+                    if not filas_agrupadas[i].get('es_origen_adicional', False):
+                        filas_finales.append(filas_agrupadas[i])
+                        coords_finales.append(coords_list[i])
+                
+                return filas_finales, coords_finales, tiempo, dist, poly
             else:
                 self._log(f"Directions API error: {data.get('status')}")
                 return filas_agrupadas, [], 0, 0, None
@@ -811,26 +830,89 @@ class CoreRouteGenerator:
         
         df_clean['Zona'] = df_clean['Alcaldia'].apply(asignar_zona)
         
+        # 🆕 ESTRATEGIA MEJORADA: MÍNIMO 4 EDIFICIOS POR RUTA
         subgrupos = {}
+        MINIMO_EDIFICIOS = 4  # 🎯 MÍNIMO 4 EDIFICIOS POR RUTA
+        
         for zona in df_clean['Zona'].unique():
-            dirs = df_clean[df_clean['Zona'] == zona].index.tolist()
-            subgrupos[zona] = [dirs[i:i+self.max_stops_per_route] for i in range(0, len(dirs), self.max_stops_per_route)]
-            self._log(f"{zona}: {len(dirs)} addresses to {len(subgrupos[zona])} routes")
+            registros_zona = df_clean[df_clean['Zona'] == zona]
+            self._log(f"🔍 Analizando zona {zona}: {len(registros_zona)} registros")
+            
+            # Si la zona tiene muy pocos registros, unir con OTRAS
+            if len(registros_zona) < MINIMO_EDIFICIOS and zona != 'OTRAS':
+                self._log(f"⚠️ Zona {zona} tiene solo {len(registros_zona)} registros - uniendo con OTRAS")
+                registros_otras = df_clean[df_clean['Zona'] == 'OTRAS']
+                if len(registros_otras) > 0:
+                    # Combinar con algunos registros de OTRAS
+                    indices_combinados = list(registros_zona.index) + list(registros_otras.index[:MINIMO_EDIFICIOS - len(registros_zona)])
+                    subgrupos[zona] = [indices_combinados]
+                    self._log(f"   ➕ Combinada con {len(registros_otras[:MINIMO_EDIFICIOS - len(registros_zona)])} registros de OTRAS")
+                    continue
+            
+            # Para zonas con suficientes registros, dividir en rutas de al menos MINIMO_EDIFICIOS
+            indices_zona = registros_zona.index.tolist()
+            
+            if len(indices_zona) >= MINIMO_EDIFICIOS:
+                # Calcular número óptimo de rutas
+                num_rutas = max(1, len(indices_zona) // MINIMO_EDIFICIOS)
+                tamaño_ruta = max(MINIMO_EDIFICIOS, len(indices_zona) // num_rutas)
+                
+                subgrupos[zona] = []
+                for i in range(0, len(indices_zona), tamaño_ruta):
+                    subgrupo = indices_zona[i:i + tamaño_ruta]
+                    if len(subgrupo) >= MINIMO_EDIFICIOS or i + tamaño_ruta >= len(indices_zona):
+                        subgrupos[zona].append(subgrupo)
+                
+                self._log(f"📍 {zona}: {len(indices_zona)} registros → {len(subgrupos[zona])} rutas (mín {MINIMO_EDIFICIOS} edificios)")
+            else:
+                # Si no alcanza el mínimo, crear una sola ruta
+                subgrupos[zona] = [indices_zona]
+                self._log(f"📍 {zona}: {len(indices_zona)} registros → 1 ruta (menos de {MINIMO_EDIFICIOS} edificios)")
+        
+        # 🆕 REORGANIZAR RUTAS DEMASIADO PEQUEÑAS
+        rutas_finales = {}
+        for zona, grupos in subgrupos.items():
+            rutas_finales[zona] = []
+            
+            for grupo in grupos:
+                if len(grupo) >= MINIMO_EDIFICIOS:
+                    rutas_finales[zona].append(grupo)
+                else:
+                    # Buscar otra ruta pequeña para combinar
+                    combinado = False
+                    for otra_zona in rutas_finales:
+                        if otra_zona != zona and rutas_finales[otra_zona]:
+                            ultima_ruta = rutas_finales[otra_zona][-1]
+                            if len(ultima_ruta) + len(grupo) <= self.max_stops_per_route * 2:  # Límite razonable
+                                rutas_finales[otra_zona][-1].extend(grupo)
+                                self._log(f"   🔄 Combinando {zona} ({len(grupo)} reg) con {otra_zona}")
+                                combinado = True
+                                break
+                    
+                    if not combinado:
+                        rutas_finales[zona].append(grupo)
+                        self._log(f"   ⚠️ {zona}: Ruta con solo {len(grupo)} registros")
         
         self._log("Generating Optimized Routes...")
         self.results = []
         ruta_id = 1
-        total_routes_to_process = sum(len(grupos) for grupos in subgrupos.values())
         
-        for zona in subgrupos.keys():
-            for i, grupo in enumerate(subgrupos[zona]):
-                self._log(f"Processing Route {ruta_id} of {total_routes_to_process}: {zona}")
+        for zona, grupos in rutas_finales.items():
+            for i, grupo in enumerate(grupos):
+                self._log(f"🛣️ Procesando Ruta {ruta_id}: {zona} ({len(grupo)} registros)")
                 try:
                     result = self._crear_ruta_archivos(zona, grupo, ruta_id)
                     if result:
                         self.results.append(result)
+                        # 🆕 VERIFICAR número de edificios
+                        if result['paradas'] < 2:
+                            self._log(f"⚠️ ADVERTENCIA: Ruta {ruta_id} tiene solo {result['paradas']} edificio(s)")
+                        elif result['paradas'] >= MINIMO_EDIFICIOS:
+                            self._log(f"✅ Ruta {ruta_id} óptima: {result['paradas']} edificios")
+                        else:
+                            self._log(f"📋 Ruta {ruta_id} aceptable: {result['paradas']} edificios")
                 except Exception as e:
-                    self._log(f"Error in route {ruta_id}: {str(e)}")
+                    self._log(f"❌ Error en ruta {ruta_id}: {str(e)}")
                 ruta_id += 1
         
         try:
@@ -844,7 +926,7 @@ class CoreRouteGenerator:
             resumen_df = pd.DataFrame([{
                 'Ruta': r['ruta_id'],
                 'Zona': r['zona'],
-                'Edificios': r['paradas'],  # 🎯 EDIFICIOS en lugar de paradas
+                'Edificios': r['paradas'],
                 'Personas': r['personas'],
                 'Distancia_km': r['distancia'],
                 'Tiempo_min': r['tiempo'],
@@ -860,11 +942,17 @@ class CoreRouteGenerator:
         total_routes_gen = len(self.results)
         total_edificios = sum(r['paradas'] for r in self.results) if self.results else 0
         total_personas = sum(r['personas'] for r in self.results) if self.results else 0
-        total_distancia = sum(r['distancia'] for r in self.results) if self.results else 0
-        total_tiempo = sum(r['tiempo'] for r in self.results) if self.results else 0
         
         self._log("CORE ROUTE GENERATION COMPLETED")
         self._log(f"FINAL SUMMARY: {total_routes_gen} routes, {total_edificios} edificios, {total_personas} personas")
+        
+        # 🆕 RESUMEN DE CALIDAD DE RUTAS
+        rutas_optimas = sum(1 for r in self.results if r['paradas'] >= MINIMO_EDIFICIOS)
+        rutas_aceptables = sum(1 for r in self.results if 2 <= r['paradas'] < MINIMO_EDIFICIOS)
+        rutas_problematicas = sum(1 for r in self.results if r['paradas'] < 2)
+        
+        self._log(f"📊 CALIDAD RUTAS: {rutas_optimas} óptimas, {rutas_aceptables} aceptables, {rutas_problematicas} problemáticas")
+        
         return self.results
 
 # =============================================================================
@@ -873,7 +961,7 @@ class CoreRouteGenerator:
 class SistemaRutasGUI:
     def __init__(self, root):
         self.root = root
-        self.root.title("Sistema Rutas PRO - AGRUPAMIENTO POR EDIFICIO")
+        self.root.title("Sistema Rutas PRO - MÍNIMO 4 EDIFICIOS POR RUTA")
         self.root.geometry("1100x800")
         self.root.configure(bg='#f0f0f0')
         
@@ -894,6 +982,7 @@ class SistemaRutasGUI:
         self.setup_ui()
         
         self.root.after(1000, self.cargar_excel_desde_github)
+
 
     def setup_ui(self):
         main_frame = ttk.Frame(self.root, padding="10")
@@ -945,7 +1034,7 @@ class SistemaRutasGUI:
         
         btn_frame = ttk.Frame(control_frame)
         btn_frame.pack(fill=tk.X)
-        self.btn_generar = ttk.Button(btn_frame, text="GENERAR RUTAS POR EDIFICIO", command=self.generar_rutas, state='disabled')
+        self.btn_generar = ttk.Button(btn_frame, text="GENERAR RUTAS (MÍN 4 EDIFICIOS)", command=self.generar_rutas, state='disabled')
         self.btn_generar.pack(side=tk.LEFT, padx=(0, 10))
         
         ttk.Button(btn_frame, text="ABRIR CARPETA MAPAS", command=lambda: self.abrir_carpeta('mapas_pro')).pack(side=tk.LEFT, padx=(0, 10))
