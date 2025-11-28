@@ -403,21 +403,21 @@ class CoreRouteGenerator:
         
         return direccion.strip()
 
-    def _calcular_distancia(self, coord1, coord2):
-        """Calcula distancia en kilómetros entre dos coordenadas"""
-        lat1, lon1 = coord1
-        lat2, lon2 = coord2
-        
-        R = 6371
-        dlat = math.radians(lat2 - lat1)
-        dlon = math.radians(lon2 - lon1)
-        a = (math.sin(dlat/2) * math.sin(dlat/2) + 
-             math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * 
-             math.sin(dlon/2) * math.sin(dlon/2))
-        c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
-        return R * c
+def _calcular_distancia(self, coord1, coord2):
+    """Calcula distancia en kilómetros entre dos coordenadas"""
+    lat1, lon1 = coord1
+    lat2, lon2 = coord2
+    
+    R = 6371
+    dlat = math.radians(lat2 - lat1)
+    dlon = math.radians(lon2 - lon1)
+    a = (math.sin(dlat/2) * math.sin(dlat/2) + 
+         math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * 
+         math.sin(dlon/2) * math.sin(dlon/2))
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
+    return R * c
 
-    def _agrupar_por_edificio(self, filas):
+def _agrupar_por_edificio(self, filas):
     """🎯 Agrupa por edificio/institución - CADA EDIFICIO ES UNA PARADA"""
     grupos = {}
     
@@ -463,7 +463,7 @@ class CoreRouteGenerator:
     
     self._log(f"🎯 Agrupamiento por edificio: {len(lista_grupos)} edificios de {len(filas)} registros")
     return lista_grupos
-
+    
     def _es_mismo_edificio(self, dir1, dir2):
         """Determina si dos direcciones pertenecen al mismo edificio"""
         # Coincidencia exacta después de normalización
