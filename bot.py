@@ -980,11 +980,11 @@ def solicitar_ruta_automatica(message):
         RUTAS_ASIGNADAS[user_id] = ruta_id
         mensaje = formatear_ruta_para_repartidor(ruta_asignada)
         
-        # 🎯 BOTONES MEJORADOS - SOLO LOS ESENCIALES Y BONITOS
+        # 🎯 BOTONES MEJORADOS - CON LISTA COMPLETA
         markup = types.InlineKeyboardMarkup()
         markup.row(
             types.InlineKeyboardButton("🗺️ Abrir en Maps", url=ruta_asignada['google_maps_url']),
-            types.InlineKeyboardButton("👥 Ver Lista Completa", callback_data=f"lista_completa_{ruta_id}")
+            types.InlineKeyboardButton("👥 VER LISTA COMPLETA", callback_data=f"lista_completa_{ruta_id}")
         )
         markup.row(
             types.InlineKeyboardButton("📦 Registrar Entrega", callback_data=f"entregar_{ruta_id}"),
@@ -1031,11 +1031,11 @@ def ver_mi_ruta(message):
                 
                 mensaje = formatear_ruta_para_repartidor(ruta)
                 
-                # 🎯 BOTONES MEJORADOS - SOLO LOS ESENCIALES
+                # 🎯 BOTONES MEJORADOS - CON LISTA COMPLETA
                 markup = types.InlineKeyboardMarkup()
                 markup.row(
                     types.InlineKeyboardButton("🗺️ Abrir en Maps", url=ruta['google_maps_url']),
-                    types.InlineKeyboardButton("👥 Ver Lista Completa", callback_data=f"lista_completa_{ruta_id}")
+                    types.InlineKeyboardButton("👥 VER LISTA COMPLETA", callback_data=f"lista_completa_{ruta_id}")
                 )
                 markup.row(
                     types.InlineKeyboardButton("📦 Registrar Entrega", callback_data=f"entregar_{ruta_id}"),
@@ -1441,11 +1441,11 @@ def manejar_callback_volver_resumen(call):
         
         mensaje = formatear_ruta_para_repartidor(ruta_encontrada)
         
-        # 🎯 BOTONES MEJORADOS - MÁS CLAROS Y ORGANIZADOS
+        # 🎯 BOTONES MEJORADOS - CON LISTA COMPLETA
         markup = types.InlineKeyboardMarkup()
         markup.row(
             types.InlineKeyboardButton("🗺️ Abrir en Maps", url=ruta_encontrada['google_maps_url']),
-            types.InlineKeyboardButton("👥 Ver Lista Completa", callback_data=f"lista_completa_{ruta_id}")
+            types.InlineKeyboardButton("👥 VER LISTA COMPLETA", callback_data=f"lista_completa_{ruta_id}")
         )
         markup.row(
             types.InlineKeyboardButton("📦 Registrar Entrega", callback_data=f"entregar_{ruta_id}"),
@@ -1535,11 +1535,11 @@ def manejar_callback_incidencia_entrega(call):
         bot.answer_callback_query(call.id, "❌ Error al procesar incidencia")
 
 def manejar_callback_contactar_supervisor(call):
-    """Manejar contacto con supervisor - VERSIÓN SIMPLE"""
+    """Manejar contacto con supervisor - VERSIÓN ACTUALIZADA"""
     try:
         mensaje = "📞 **CONTACTO CON SUPERVISOR**\n\n"
-        mensaje += "🔸 **Supervisor:** Lic. Roberto Martínez\n"
-        mensaje += "🔸 **Teléfono:** 55-1234-5678\n"
+        mensaje += "🔸 **Supervisor:** Lic. Pedro Javier Hernandez Vasquez\n"
+        mensaje += "🔸 **Teléfono:** 55 3197 3078\n"
         mensaje += "🔸 **Horario:** 7:00 - 19:00 hrs\n\n"
         mensaje += "📲 _Puedes llamar o enviar mensaje directamente_"
         
@@ -1657,7 +1657,7 @@ def manejar_todos_los_callbacks(call):
                             markup = types.InlineKeyboardMarkup()
                             markup.row(
                                 types.InlineKeyboardButton("🗺️ Abrir en Maps", url=ruta['google_maps_url']),
-                                types.InlineKeyboardButton("👥 Ver Lista Completa", callback_data=f"lista_completa_{ruta_id}")
+                                types.InlineKeyboardButton("👥 VER LISTA COMPLETA", callback_data=f"lista_completa_{ruta_id}")
                             )
                             markup.row(
                                 types.InlineKeyboardButton("📦 Registrar Entrega", callback_data=f"entregar_{ruta_id}"),
