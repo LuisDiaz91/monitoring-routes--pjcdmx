@@ -1737,7 +1737,7 @@ def listar_fotos_usuario(user_id):
 
 @app.route('/galeria_fotos')
 def galeria_fotos_interactiva():
-    """Galería web interactiva para ver todas las fotos"""
+    """Galería web interactiva para ver todas las fotos - VERSIÓN CORREGIDA"""
     try:
         cursor.execute('''
             SELECT file_id, user_name, caption, tipo, ruta_local, timestamp, LENGTH(datos) as tamaño 
@@ -1773,9 +1773,9 @@ def galeria_fotos_interactiva():
         <body>
             <div class="header">
                 <h1>📸 Galería de Fotos - Sistema PJCDMX</h1>
-                <p>Total de fotos en sistema: <strong>%d</strong></p>
+                <p>Total de fotos en sistema: <strong>""" + str(len(fotos)) + """</strong></p>
             </div>
-        """ % len(fotos)
+        """
         
         for foto in fotos:
             file_id, user_name, caption, tipo, ruta_local, timestamp, tamaño = foto
@@ -1784,29 +1784,29 @@ def galeria_fotos_interactiva():
             tiene_datos = tamaño > 0
             tiene_archivo = ruta_local and os.path.exists(ruta_local)
             
-            html += f"""
+            html += """
             <div class="foto-container">
-                <img src="/api/fotos/{file_id}" class="foto-img" 
+                <img src="/api/fotos/""" + file_id + """" class="foto-img" 
                      onerror="this.src='https://via.placeholder.com/300x200?text=Foto+no+disponible'">
                 
                 <div class="foto-info">
-                    <div class="foto-caption">{caption if caption else 'Sin descripción'}</div>
+                    <div class="foto-caption">""" + (caption if caption else 'Sin descripción') + """</div>
                     <div class="foto-meta">
-                        <strong>👤 Usuario:</strong> {user_name}<br>
-                        <strong>📁 Tipo:</strong> {tipo}<br>
-                        <strong>🕒 Fecha:</strong> {timestamp}<br>
-                        <strong>📊 Tamaño:</strong> {tamaño} bytes
+                        <strong>👤 Usuario:</strong> """ + user_name + """<br>
+                        <strong>📁 Tipo:</strong> """ + tipo + """<br>
+                        <strong>🕒 Fecha:</strong> """ + str(timestamp) + """<br>
+                        <strong>📊 Tamaño:</strong> """ + str(tamaño) + """ bytes
                     </div>
                     <div style="margin-top: 8px;">
-                        <span class="estado {'estado-datos' if tiene_datos else 'estado-sin'}">
-                            {'✅ BD' if tiene_datos else '❌ BD'}
+                        <span class="estado """ + ("estado-datos" if tiene_datos else "estado-sin") + """">
+                            """ + ("✅ BD" if tiene_datos else "❌ BD") + """
                         </span>
-                        <span class="estado {'estado-archivo' if tiene_archivo else 'estado-sin'}">
-                            {'✅ Archivo' if tiene_archivo else '❌ Archivo'}
+                        <span class="estado """ + ("estado-archivo" if tiene_archivo else "estado-sin") + """">
+                            """ + ("✅ Archivo" if tiene_archivo else "❌ Archivo") + """
                         </span>
                     </div>
                     <div style="margin-top: 8px;">
-                        <a href="/api/fotos/{file_id}" target="_blank" style="color: #3498db; text-decoration: none;">
+                        <a href="/api/fotos/""" + file_id + """" target="_blank" style="color: #3498db; text-decoration: none;">
                             🔗 Ver foto completa
                         </a>
                     </div>
