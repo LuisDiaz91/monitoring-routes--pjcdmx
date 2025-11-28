@@ -980,18 +980,19 @@ def solicitar_ruta_automatica(message):
         RUTAS_ASIGNADAS[user_id] = ruta_id
         mensaje = formatear_ruta_para_repartidor(ruta_asignada)
         
+        # 🎯 BOTONES MEJORADOS - SOLO LOS ESENCIALES Y BONITOS
         markup = types.InlineKeyboardMarkup()
         markup.row(
             types.InlineKeyboardButton("🗺️ Abrir en Maps", url=ruta_asignada['google_maps_url']),
             types.InlineKeyboardButton("👥 Ver Lista Completa", callback_data=f"lista_completa_{ruta_id}")
         )
         markup.row(
-            types.InlineKeyboardButton("📦 Entregar", callback_data=f"entregar_{ruta_id}"),
-            types.InlineKeyboardButton("📊 Estatus", callback_data=f"estatus_{ruta_id}")
+            types.InlineKeyboardButton("📦 Registrar Entrega", callback_data=f"entregar_{ruta_id}"),
+            types.InlineKeyboardButton("📍 Mi Ubicación", callback_data="nueva_ubicacion")
         )
         markup.row(
-            types.InlineKeyboardButton("📍 Ubicación", callback_data="nueva_ubicacion"),
-            types.InlineKeyboardButton("🚨 Incidencia", callback_data=f"incidencia_{ruta_id}")
+            types.InlineKeyboardButton("📊 Progreso", callback_data=f"estatus_{ruta_id}"),
+            types.InlineKeyboardButton("🚨 Reportar Problema", callback_data=f"incidencia_{ruta_id}")
         )
         
         try:
@@ -1029,18 +1030,20 @@ def ver_mi_ruta(message):
                     ruta = json.load(f)
                 
                 mensaje = formatear_ruta_para_repartidor(ruta)
+                
+                # 🎯 BOTONES MEJORADOS - SOLO LOS ESENCIALES
                 markup = types.InlineKeyboardMarkup()
                 markup.row(
                     types.InlineKeyboardButton("🗺️ Abrir en Maps", url=ruta['google_maps_url']),
                     types.InlineKeyboardButton("👥 Ver Lista Completa", callback_data=f"lista_completa_{ruta_id}")
                 )
                 markup.row(
-                    types.InlineKeyboardButton("📦 Entregar", callback_data=f"entregar_{ruta_id}"),
-                    types.InlineKeyboardButton("📊 Estatus", callback_data=f"estatus_{ruta_id}")
+                    types.InlineKeyboardButton("📦 Registrar Entrega", callback_data=f"entregar_{ruta_id}"),
+                    types.InlineKeyboardButton("📍 Mi Ubicación", callback_data="nueva_ubicacion")
                 )
                 markup.row(
-                    types.InlineKeyboardButton("📍 Ubicación", callback_data="nueva_ubicacion"),
-                    types.InlineKeyboardButton("🚨 Incidencia", callback_data=f"incidencia_{ruta_id}")
+                    types.InlineKeyboardButton("📊 Progreso", callback_data=f"estatus_{ruta_id}"),
+                    types.InlineKeyboardButton("🚨 Reportar Problema", callback_data=f"incidencia_{ruta_id}")
                 )
                 
                 try:
@@ -1141,7 +1144,7 @@ def manejar_fotos(message):
             pass
 
 # =============================================================================
-# HANDLERS PARA BOTONES INLINE (CALLBACKS)
+# HANDLERS PARA BOTONES INLINE (CALLBACKS) - VERSIÓN MEJORADA
 # =============================================================================
 
 def manejar_callback_foto_entrega(call):
@@ -1184,7 +1187,7 @@ def manejar_callback_foto_entrega(call):
         bot.answer_callback_query(call.id, "❌ Error al preparar foto")
 
 def manejar_callback_entregar(call):
-    """Manejar clic en botón 'Entregar' - VERSIÓN MEJORADA"""
+    """Manejar clic en botón 'Entregar' - VERSIÓN MEJORADA Y SIMPLIFICADA"""
     try:
         # Extraer ruta_id del callback data (ej: "entregar_5")
         partes = call.data.split('_')
@@ -1210,7 +1213,7 @@ def manejar_callback_entregar(call):
         mensaje += "• `PARA CARLOS RODRÍGUEZ`\n"
         mensaje += "• `ACUSE DE JUANA LÓPEZ`\n"
 
-        # Crear teclado con opciones MEJORADO
+        # 🎯 BOTONES SIMPLIFICADOS - SOLO LOS ESENCIALES
         markup = types.InlineKeyboardMarkup()
         markup.row(
             types.InlineKeyboardButton("📸 Subir foto ahora", callback_data=f"foto_{ruta_id}"),
@@ -1235,7 +1238,7 @@ def manejar_callback_entregar(call):
         bot.answer_callback_query(call.id, "❌ Error al procesar entrega")
 
 def manejar_callback_estatus(call):
-    """Manejar clic en botón 'Estatus'"""
+    """Manejar clic en botón 'Estatus' - VERSIÓN SIMPLIFICADA"""
     try:
         user_id = call.from_user.id
         
@@ -1270,14 +1273,14 @@ def manejar_callback_estatus(call):
                         mensaje += f"🏢 {siguiente_parada.get('dependencia', 'N/A')}\n"
                         mensaje += f"📪 {siguiente_parada['direccion'][:50]}..."
                 
-                # Botones de acción
+                # 🎯 BOTONES SIMPLIFICADOS
                 markup = types.InlineKeyboardMarkup()
                 markup.row(
                     types.InlineKeyboardButton("📦 Registrar entrega", callback_data=f"entregar_{ruta_id}"),
                     types.InlineKeyboardButton("🗺️ Ver en Maps", url=ruta['google_maps_url'])
                 )
                 markup.row(
-                    types.InlineKeyboardButton("🔄 Actualizar", callback_data="estatus_actualizar"),
+                    types.InlineKeyboardButton("🔄 Actualizar", callback_data=f"estatus_{ruta_id}"),
                     types.InlineKeyboardButton("❌ Cerrar", callback_data="cancelar")
                 )
                 
@@ -1297,11 +1300,12 @@ def manejar_callback_estatus(call):
         bot.answer_callback_query(call.id, "❌ Error al obtener estatus")
 
 def manejar_callback_incidencia(call):
-    """Manejar clic en botón 'Incidencia'"""
+    """Manejar clic en botón 'Incidencia' - VERSIÓN SIMPLIFICADA"""
     try:
         mensaje = "🚨 **REPORTAR INCIDENCIA**\n\n"
         mensaje += "Selecciona el tipo de incidencia:\n\n"
         
+        # 🎯 BOTONES SIMPLIFICADOS - SOLO LOS MÁS IMPORTANTES
         markup = types.InlineKeyboardMarkup()
         markup.row(
             types.InlineKeyboardButton("🚗 Tráfico", callback_data="incidencia_trafico"),
@@ -1309,10 +1313,9 @@ def manejar_callback_incidencia(call):
         )
         markup.row(
             types.InlineKeyboardButton("📦 Entrega", callback_data="incidencia_entrega"),
-            types.InlineKeyboardButton("👤 Personal", callback_data="incidencia_personal")
+            types.InlineKeyboardButton("📞 Supervisor", callback_data="contactar_supervisor")
         )
         markup.row(
-            types.InlineKeyboardButton("📞 Contactar supervisor", callback_data="contactar_supervisor"),
             types.InlineKeyboardButton("❌ Cancelar", callback_data="cancelar")
         )
         
@@ -1331,7 +1334,7 @@ def manejar_callback_incidencia(call):
         bot.answer_callback_query(call.id, "❌ Error al procesar incidencia")
 
 def manejar_callback_lista_completa(call):
-    """Manejar clic en botón 'Ver Lista Completa' - VERSIÓN CORREGIDA"""
+    """Manejar clic en botón 'Ver Lista Completa' - VERSIÓN CORREGIDA Y MEJORADA"""
     try:
         # 🆕 CORRECCIÓN: Extraer ruta_id correctamente
         # El formato es "lista_completa_5" -> ["lista", "completa", "5"]
@@ -1361,7 +1364,7 @@ def manejar_callback_lista_completa(call):
         # 🆕 USAR LA FUNCIÓN SEGURA SIN MARKDOWN
         mensaje = formatear_lista_completa(ruta_encontrada)
         
-        # Crear teclado con opciones
+        # 🎯 BOTONES MEJORADOS - MÁS CLAROS Y ORGANIZADOS
         markup = types.InlineKeyboardMarkup()
         markup.row(
             types.InlineKeyboardButton("📦 Registrar entrega", callback_data=f"entregar_{ruta_id}"),
@@ -1410,7 +1413,7 @@ def manejar_callback_lista_completa(call):
         bot.answer_callback_query(call.id, "❌ Error al mostrar lista")
 
 def manejar_callback_volver_resumen(call):
-    """Manejar clic en botón 'Volver al resumen' - VERSIÓN CORREGIDA"""
+    """Manejar clic en botón 'Volver al resumen' - VERSIÓN CORREGIDA Y MEJORADA"""
     try:
         # 🆕 CORRECCIÓN: Extraer ruta_id correctamente
         partes = call.data.split('_')
@@ -1438,18 +1441,19 @@ def manejar_callback_volver_resumen(call):
         
         mensaje = formatear_ruta_para_repartidor(ruta_encontrada)
         
+        # 🎯 BOTONES MEJORADOS - MÁS CLAROS Y ORGANIZADOS
         markup = types.InlineKeyboardMarkup()
         markup.row(
             types.InlineKeyboardButton("🗺️ Abrir en Maps", url=ruta_encontrada['google_maps_url']),
             types.InlineKeyboardButton("👥 Ver Lista Completa", callback_data=f"lista_completa_{ruta_id}")
         )
         markup.row(
-            types.InlineKeyboardButton("📦 Entregar", callback_data=f"entregar_{ruta_id}"),
-            types.InlineKeyboardButton("📊 Estatus", callback_data=f"estatus_{ruta_id}")
+            types.InlineKeyboardButton("📦 Registrar Entrega", callback_data=f"entregar_{ruta_id}"),
+            types.InlineKeyboardButton("📍 Mi Ubicación", callback_data="nueva_ubicacion")
         )
         markup.row(
-            types.InlineKeyboardButton("📍 Ubicación", callback_data="nueva_ubicacion"),
-            types.InlineKeyboardButton("🚨 Incidencia", callback_data=f"incidencia_{ruta_id}")
+            types.InlineKeyboardButton("📊 Progreso", callback_data=f"estatus_{ruta_id}"),
+            types.InlineKeyboardButton("🚨 Reportar Problema", callback_data=f"incidencia_{ruta_id}")
         )
         
         # 🆕 MANEJO SEGURO DE MARKDOWN
@@ -1484,6 +1488,7 @@ def manejar_callback_volver_resumen(call):
         print(f"❌ Error en volver resumen callback: {e}")
         bot.answer_callback_query(call.id, "❌ Error al volver al resumen")
 
+# 🎯 CALLBACKS SIMPLIFICADOS PARA INCIDENCIAS
 def manejar_callback_incidencia_trafico(call):
     """Manejar incidencia de tráfico - VERSIÓN SIMPLE"""
     try:
@@ -1527,21 +1532,6 @@ def manejar_callback_incidencia_entrega(call):
         
     except Exception as e:
         print(f"❌ Error en incidencia entrega: {e}")
-        bot.answer_callback_query(call.id, "❌ Error al procesar incidencia")
-
-def manejar_callback_incidencia_personal(call):
-    """Manejar incidencia personal - VERSIÓN SIMPLE"""
-    try:
-        mensaje = "👤 **INCIDENCIA PERSONAL REGISTRADA**\n\n"
-        mensaje += "Se ha registrado tu reporte personal.\n"
-        mensaje += "Recursos Humanos ha sido notificado.\n\n"
-        mensaje += "🤝 _Nos pondremos en contacto contigo pronto..._"
-        
-        bot.answer_callback_query(call.id, "👤 Incidencia personal registrada")
-        bot.send_message(call.message.chat.id, mensaje, parse_mode='Markdown')
-        
-    except Exception as e:
-        print(f"❌ Error en incidencia personal: {e}")
         bot.answer_callback_query(call.id, "❌ Error al procesar incidencia")
 
 def manejar_callback_contactar_supervisor(call):
@@ -1616,7 +1606,7 @@ def manejar_callback_cerrar_ubicacion(call):
 
 @bot.callback_query_handler(func=lambda call: True)
 def manejar_todos_los_callbacks(call):
-    """Manejar TODOS los clics en botones inline"""
+    """Manejar TODOS los clics en botones inline - VERSIÓN SIMPLIFICADA"""
     try:
         user_id = call.from_user.id
         user_name = call.from_user.first_name
@@ -1637,7 +1627,7 @@ def manejar_todos_los_callbacks(call):
             manejar_callback_volver_resumen(call)
         elif data.startswith('foto_'):
             manejar_callback_foto_entrega(call)
-        # 🆕 NUEVOS CALLBACKS DE UBICACIÓN
+        # 🎯 CALLBACKS SIMPLIFICADOS
         elif data == 'nueva_ubicacion':
             manejar_callback_nueva_ubicacion(call)
         elif data == 'cerrar_ubicacion':
@@ -1648,13 +1638,11 @@ def manejar_todos_los_callbacks(call):
             manejar_callback_incidencia_vehicular(call)
         elif data == 'incidencia_entrega':
             manejar_callback_incidencia_entrega(call)
-        elif data == 'incidencia_personal':
-            manejar_callback_incidencia_personal(call)
         elif data == 'contactar_supervisor':
             manejar_callback_contactar_supervisor(call)
         elif data == 'cancelar':
             bot.answer_callback_query(call.id, "❌ Acción cancelada")
-            # 🆕 MEJORA: No eliminar el mensaje, volver a la ruta
+            # 🎯 MEJORA: No eliminar el mensaje, volver a la ruta
             try:
                 user_id = call.from_user.id
                 if user_id in RUTAS_ASIGNADAS:
@@ -1672,12 +1660,12 @@ def manejar_todos_los_callbacks(call):
                                 types.InlineKeyboardButton("👥 Ver Lista Completa", callback_data=f"lista_completa_{ruta_id}")
                             )
                             markup.row(
-                                types.InlineKeyboardButton("📦 Entregar", callback_data=f"entregar_{ruta_id}"),
-                                types.InlineKeyboardButton("📊 Estatus", callback_data=f"estatus_{ruta_id}")
+                                types.InlineKeyboardButton("📦 Registrar Entrega", callback_data=f"entregar_{ruta_id}"),
+                                types.InlineKeyboardButton("📍 Mi Ubicación", callback_data="nueva_ubicacion")
                             )
                             markup.row(
-                                types.InlineKeyboardButton("📍 Ubicación", callback_data="nueva_ubicacion"),
-                                types.InlineKeyboardButton("🚨 Incidencia", callback_data=f"incidencia_{ruta_id}")
+                                types.InlineKeyboardButton("📊 Progreso", callback_data=f"estatus_{ruta_id}"),
+                                types.InlineKeyboardButton("🚨 Reportar Problema", callback_data=f"incidencia_{ruta_id}")
                             )
                             
                             bot.edit_message_text(
