@@ -921,10 +921,21 @@ def manejar_todos_los_callbacks(call):
             manejar_callback_estatus(call)
         elif data.startswith('incidencia_'):
             manejar_callback_incidencia(call)
-        elif data.startswith('lista_completa_'):  # 🆕 NUEVO CALLBACK
+        elif data.startswith('lista_completa_'): 
             manejar_callback_lista_completa(call)
-        elif data.startswith('volver_resumen_'):  # 🆕 CALLBACK PARA VOLVER
+        elif data.startswith('volver_resumen_'): 
             manejar_callback_volver_resumen(call)
+        # 🆕 NUEVOS HANDLERS SIMPLES PARA INCIDENCIAS
+        elif data == 'incidencia_trafico':
+            manejar_callback_incidencia_trafico(call)
+        elif data == 'incidencia_vehicular':
+            manejar_callback_incidencia_vehicular(call)
+        elif data == 'incidencia_entrega':
+            manejar_callback_incidencia_entrega(call)
+        elif data == 'incidencia_personal':
+            manejar_callback_incidencia_personal(call)
+        elif data == 'contactar_supervisor':
+            manejar_callback_contactar_supervisor(call)
         elif data == 'cancelar':
             bot.answer_callback_query(call.id, "❌ Acción cancelada")
             bot.delete_message(call.message.chat.id, call.message.message_id)
@@ -937,7 +948,7 @@ def manejar_todos_los_callbacks(call):
             bot.answer_callback_query(call.id, "❌ Error procesando comando")
         except:
             pass
-
+            
 def manejar_callback_entregar(call):
     """Manejar clic en botón 'Entregar'"""
     try:
@@ -1171,6 +1182,82 @@ def manejar_callback_volver_resumen(call):
     except Exception as e:
         print(f"❌ Error en volver resumen callback: {e}")
         bot.answer_callback_query(call.id, "❌ Error al volver al resumen")
+
+def manejar_callback_incidencia_trafico(call):
+    """Manejar incidencia de tráfico - VERSIÓN SIMPLE"""
+    try:
+        mensaje = "🚗 **INCIDENCIA DE TRÁFICO REGISTRADA**\n\n"
+        mensaje += "Se ha registrado tu reporte de tráfico.\n"
+        mensaje += "El supervisor ha sido notificado.\n\n"
+        mensaje += "📝 _Por favor envía un mensaje con los detalles específicos..._"
+        
+        bot.answer_callback_query(call.id, "🚗 Reporte de tráfico registrado")
+        bot.send_message(call.message.chat.id, mensaje, parse_mode='Markdown')
+        
+    except Exception as e:
+        print(f"❌ Error en incidencia tráfico: {e}")
+        bot.answer_callback_query(call.id, "❌ Error al procesar incidencia")
+
+def manejar_callback_incidencia_vehicular(call):
+    """Manejar incidencia vehicular - VERSIÓN SIMPLE"""
+    try:
+        mensaje = "🛑 **INCIDENCIA VEHICULAR REGISTRADA**\n\n"
+        mensaje += "Se ha registrado tu reporte vehicular.\n"
+        mensaje += "El departamento de transporte ha sido notificado.\n\n"
+        mensaje += "📞 _Te contactaremos pronto para asistencia..._"
+        
+        bot.answer_callback_query(call.id, "🛑 Reporte vehicular registrado")
+        bot.send_message(call.message.chat.id, mensaje, parse_mode='Markdown')
+        
+    except Exception as e:
+        print(f"❌ Error en incidencia vehicular: {e}")
+        bot.answer_callback_query(call.id, "❌ Error al procesar incidencia")
+
+def manejar_callback_incidencia_entrega(call):
+    """Manejar incidencia de entrega - VERSIÓN SIMPLE"""
+    try:
+        mensaje = "📦 **PROBLEMA DE ENTREGA REGISTRADO**\n\n"
+        mensaje += "Se ha registrado el problema con la entrega.\n"
+        mensaje += "El supervisor de rutas ha sido notificado.\n\n"
+        mensaje += "📋 _Por favor proporciona detalles del problema..._"
+        
+        bot.answer_callback_query(call.id, "📦 Problema de entrega registrado")
+        bot.send_message(call.message.chat.id, mensaje, parse_mode='Markdown')
+        
+    except Exception as e:
+        print(f"❌ Error en incidencia entrega: {e}")
+        bot.answer_callback_query(call.id, "❌ Error al procesar incidencia")
+
+def manejar_callback_incidencia_personal(call):
+    """Manejar incidencia personal - VERSIÓN SIMPLE"""
+    try:
+        mensaje = "👤 **INCIDENCIA PERSONAL REGISTRADA**\n\n"
+        mensaje += "Se ha registrado tu reporte personal.\n"
+        mensaje += "Recursos Humanos ha sido notificado.\n\n"
+        mensaje += "🤝 _Nos pondremos en contacto contigo pronto..._"
+        
+        bot.answer_callback_query(call.id, "👤 Incidencia personal registrada")
+        bot.send_message(call.message.chat.id, mensaje, parse_mode='Markdown')
+        
+    except Exception as e:
+        print(f"❌ Error en incidencia personal: {e}")
+        bot.answer_callback_query(call.id, "❌ Error al procesar incidencia")
+
+def manejar_callback_contactar_supervisor(call):
+    """Manejar contacto con supervisor - VERSIÓN SIMPLE"""
+    try:
+        mensaje = "📞 **CONTACTO CON SUPERVISOR**\n\n"
+        mensaje += "🔸 **Supervisor:** Lic. Roberto Martínez\n"
+        mensaje += "🔸 **Teléfono:** 55-1234-5678\n"
+        mensaje += "🔸 **Horario:** 7:00 - 19:00 hrs\n\n"
+        mensaje += "📲 _Puedes llamar o enviar mensaje directamente_"
+        
+        bot.answer_callback_query(call.id, "📞 Información de supervisor")
+        bot.send_message(call.message.chat.id, mensaje, parse_mode='Markdown')
+        
+    except Exception as e:
+        print(f"❌ Error en contacto supervisor: {e}")
+        bot.answer_callback_query(call.id, "❌ Error al contactar")
 
 # =============================================================================
 # ENDPOINTS FLASK PARA SINCRONIZACIÓN
