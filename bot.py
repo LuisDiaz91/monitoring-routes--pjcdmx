@@ -226,12 +226,52 @@ def formatear_ruta_para_repartidor(ruta):
         print(f"❌ Error formateando ruta: {e}")
         return f"🗺️ Ruta {ruta['ruta_id']} - {ruta['zona']} ({len(ruta['paradas'])} paradas)"
         
+def formatear_lista_completa(ruta):
+    """Formatear lista completa de personas de manera SEGURA"""
+    try:
+        texto = f"👥 **LISTA COMPLETA - RUTA {ruta['ruta_id']}**\n\n"
+        texto += f"📍 Zona: {ruta['zona']}\n"
+        texto += f"📊 Total de personas: {len(ruta['paradas'])}\n\n"
+        
+        entregadas = 0
+        for i, parada in enumerate(ruta['paradas'], 1):
+            estado = "✅" if parada.get('estado') == 'entregado' else "📍"
+            # Limpieza segura del texto
+            nombre_limpio = limpiar_texto_markdown(parada['nombre'])
+            dependencia_limpia = limpiar_texto_markdown(parada.get('dependencia', 'N/A'))
+            direccion_limpia = limpiar_texto_markdown(parada.get('direccion', 'N/A')[:30])
+            
+            texto += f"{estado} **{parada['orden']}. {nombre_limpio}**\n"
+            texto += f"   🏢 {dependencia_limpia}\n"
+            texto += f"   📍 {direccion_limpia}...\n"
+            
+            if parada.get('estado') == 'entregado':
+                entregadas += 1
+                texto += f"   🕒 {parada.get('timestamp_entrega', '')[:16]}\n"
+            
+            texto += "\n"
+        
+        texto += f"📈 **Progreso: {entregadas}/{len(ruta['paradas'])} entregadas**"
+        
+        return texto
+        
+    except Exception as e:
+        print(f"❌ Error formateando lista completa: {e}")
+        return f"❌ Error al generar la lista completa: {str(e)}"
+        
 def registrar_avance_pendiente(datos_avance):
-    """🆕 Registrar un nuevo avance pendiente de sincronización"""
+    """🆕 Registrar un nuevo avance pendiente - VERSIÓN MEJORADA"""
     try:
         avance_id = f"avance_{int(time.time())}_{hash(str(datos_avance)) % 10000}"
         datos_avance['_id'] = avance_id
         datos_avance['_timestamp'] = datetime.now().isoformat()
+        datos_avance['_procesado'] = False
+        
+        # 🆕 INFORMACIÓN EXTRA PARA DEBUG
+        datos_avance['_debug'] = {
+            'ruta_existe': os.path.exists(datos_avance.get('foto_local', '')),
+            'timestamp_creacion': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }
         
         # Guardar en archivo
         os.makedirs('avances_ruta', exist_ok=True)
@@ -248,10 +288,15 @@ def registrar_avance_pendiente(datos_avance):
             AVANCES_PENDIENTES = AVANCES_PENDIENTES[-100:]
         
         print(f"📝 Nuevo avance pendiente registrado: {avance_id}")
+        print(f"   👤 {datos_avance.get('persona_entregada', 'N/A')}")
+        print(f"   🗺️ Ruta {datos_avance.get('ruta_id', 'N/A')}")
+        print(f"   📁 Foto: {datos_avance.get('foto_local', 'N/A')}")
+        
         return True
         
     except Exception as e:
         print(f"❌ Error registrando avance pendiente: {e}")
+        traceback.print_exc()
         return False
 
 def registrar_entrega_sistema(user_id, user_name, persona_entregada, ruta_foto_local, comentarios=""):
@@ -439,17 +484,18 @@ def extraer_nombre_entrega(texto):
     return ' '.join(palabras).title() if palabras else "Persona no identificada"
 
 def procesar_entrega_con_foto(user_id, user_name, file_id, caption, ruta_foto_guardada):
-    """Procesar una entrega con foto - VERSIÓN QUE GUARDA EN CARPETA"""
+    """Procesar una entrega con foto - VERSIÓN SEGURA SIN MARKDOWN"""
     try:
         # Extraer nombre de persona
         persona_entregada = extraer_nombre_entrega(caption)
         
         if user_id not in RUTAS_ASIGNADAS:
-            respuesta = (f"📸 **FOTO RECIBIDA**\n\n"
+            # 🆕 MENSAJE SIMPLE SIN MARKDOWN
+            respuesta = (f"📸 FOTO RECIBIDA\n\n"
                        f"👤 {persona_entregada}\n"
-                       f"📁 Guardada en: {ruta_foto_guardada if ruta_foto_guardada else 'No se pudo guardar'}\n"
+                       f"📁 Guardada en sistema\n"
                        f"⚠️ No tienes ruta activa asignada")
-            bot.send_message(user_id, respuesta, parse_mode='Markdown')
+            bot.send_message(user_id, respuesta, parse_mode=None)
             return
         
         ruta_id = RUTAS_ASIGNADAS[user_id]
@@ -463,6 +509,8 @@ def procesar_entrega_con_foto(user_id, user_name, file_id, caption, ruta_foto_gu
                 
                 # Buscar persona en paradas
                 persona_encontrada = False
+                persona_actual = ""
+                
                 for parada in ruta_data['paradas']:
                     nombre_parada = parada['nombre'].upper()
                     persona_buscar = persona_entregada.upper()
@@ -476,6 +524,7 @@ def procesar_entrega_con_foto(user_id, user_name, file_id, caption, ruta_foto_gu
                         parada['timestamp_entrega'] = timestamp
                         parada['foto_acuse'] = ruta_foto_guardada
                         persona_encontrada = True
+                        persona_actual = parada['nombre']
                         print(f"✅ Persona encontrada en ruta: {parada['nombre']}")
                         break
                 
@@ -489,6 +538,7 @@ def procesar_entrega_con_foto(user_id, user_name, file_id, caption, ruta_foto_gu
                             parada['foto_acuse'] = ruta_foto_guardada
                             parada['comentarios'] = f"{caption} (coincidencia parcial)"
                             persona_encontrada = True
+                            persona_actual = parada['nombre']
                             print(f"✅ Coincidencia parcial: {persona_entregada} → {parada['nombre']}")
                             break
                 
@@ -501,49 +551,62 @@ def procesar_entrega_con_foto(user_id, user_name, file_id, caption, ruta_foto_gu
                     entregadas = len([p for p in ruta_data['paradas'] if p.get('estado') == 'entregado'])
                     total = len(ruta_data['paradas'])
                     
-                    respuesta = (f"✅ **ENTREGA REGISTRADA**\n\n"
-                               f"👤 {persona_entregada}\n"
+                    # 🆕 MENSAJE SIMPLE SIN MARKDOWN
+                    respuesta = (f"✅ ENTREGA REGISTRADA\n\n"
+                               f"👤 {persona_actual}\n"
                                f"📅 {timestamp}\n"
-                               f"📁 Foto: {ruta_foto_guardada if ruta_foto_guardada else 'Guardada'}\n"
                                f"📊 Progreso: {entregadas}/{total}")
                     
                     # Si se completó la ruta
                     if entregadas == total:
-                        respuesta += "\n\n🎉 **¡RUTA COMPLETADA!**"
+                        respuesta += "\n\n🎉 ¡RUTA COMPLETADA!"
+                        
+                    # 🆕 CREAR AVANCE PENDIENTE
+                    avance = {
+                        'ruta_id': ruta_id,
+                        'repartidor': user_name,
+                        'repartidor_id': user_id,
+                        'persona_entregada': persona_actual,
+                        'foto_local': ruta_foto_guardada,
+                        'timestamp': timestamp,
+                        'comentarios': caption,
+                        'tipo': 'entrega'
+                    }
+                    
+                    registrar_avance_pendiente(avance)
+                    print(f"📝 Avance pendiente creado para Ruta {ruta_id}")
                         
                 else:
-                    respuesta = (f"⚠️ **ENTREGA REGISTRADA CON OBSERVACIONES**\n\n"
+                    # 🆕 MENSAJE SIMPLE SIN MARKDOWN
+                    respuesta = (f"⚠️ ENTREGA REGISTRADA CON OBSERVACIONES\n\n"
                                f"👤 {persona_entregada}\n"
                                f"📅 {timestamp}\n"
-                               f"📁 Foto: {ruta_foto_guardada if ruta_foto_guardada else 'Guardada'}\n"
                                f"ℹ️ Persona no encontrada en lista original")
                 
-                bot.send_message(user_id, respuesta, parse_mode='Markdown')
+                bot.send_message(user_id, respuesta, parse_mode=None)  # 🆕 SIN MARKDOWN
                 print(f"✅ Entrega registrada: {persona_entregada} en Ruta {ruta_id}")
-                
-                # ACTUALIZAR EXCEL AUTOMÁTICAMENTE
-                actualizar_excel_desde_entrega(ruta_id, persona_entregada, ruta_foto_guardada, user_name, timestamp)
                 return
         
-        bot.send_message(user_id, "❌ No se encontró la ruta asignada")
+        bot.send_message(user_id, "❌ No se encontró la ruta asignada", parse_mode=None)
         
     except Exception as e:
         print(f"❌ Error procesando entrega: {e}")
-        bot.send_message(user_id, "❌ Error al registrar entrega")
+        traceback.print_exc()
+        bot.send_message(user_id, "❌ Error al registrar entrega", parse_mode=None)
 
 def procesar_foto_reporte(user_id, user_name, file_id, caption, ruta_foto_guardada):
-    """Procesar foto de reporte/incidencia - VERSIÓN QUE GUARDA EN CARPETA"""
+    """Procesar foto de reporte/incidencia - SIN MARKDOWN PROBLEMÁTICO"""
     try:
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         
-        respuesta = (f"📸 **REPORTE CON FOTO**\n\n"
+        # 🆕 MENSAJE SIMPLE SIN MARKDOWN
+        respuesta = (f"📸 REPORTE CON FOTO\n\n"
                    f"👤 {user_name}\n"
                    f"📅 {timestamp}\n"
                    f"📝 {caption if caption else 'Sin descripción'}\n"
-                   f"📁 Guardada en: {ruta_foto_guardada if ruta_foto_guardada else 'Sistema'}\n"
-                   f"✅ Reporte registrado")
+                   f"✅ Reporte registrado en sistema")
         
-        bot.send_message(user_id, respuesta, parse_mode='Markdown')
+        bot.send_message(user_id, respuesta, parse_mode=None)  # 🆕 SIN MARKDOWN
         print(f"✅ Foto de reporte guardada: {ruta_foto_guardada}")
         
     except Exception as e:
@@ -693,7 +756,8 @@ def solicitar_ruta_automatica(message):
         
         markup = types.InlineKeyboardMarkup()
         markup.row(
-            types.InlineKeyboardButton("🗺️ Abrir en Maps", url=ruta_asignada['google_maps_url'])
+            types.InlineKeyboardButton("🗺️ Abrir en Maps", url=ruta_asignada['google_maps_url']),
+            types.InlineKeyboardButton("👥 Ver Lista Completa", callback_data=f"lista_completa_{ruta_id}")
         )
         markup.row(
             types.InlineKeyboardButton("📦 Entregar", callback_data=f"entregar_{ruta_id}"),
@@ -740,7 +804,8 @@ def ver_mi_ruta(message):
                 mensaje = formatear_ruta_para_repartidor(ruta)
                 markup = types.InlineKeyboardMarkup()
                 btn_maps = types.InlineKeyboardButton("🗺️ Abrir en Google Maps", url=ruta['google_maps_url'])
-                markup.add(btn_maps)
+                btn_lista = types.InlineKeyboardButton("👥 Ver Lista Completa", callback_data=f"lista_completa_{ruta_id}")
+                markup.add(btn_maps, btn_lista)
                 
                 try:
                     bot.reply_to(message, mensaje, parse_mode='Markdown', reply_markup=markup)
@@ -764,37 +829,36 @@ def ver_mi_ruta(message):
 @manejar_errores_telegram   
 @bot.message_handler(content_types=['photo'])
 def manejar_fotos(message):
-    """Manejar fotos de entregas y reportes - VERSIÓN CORREGIDA"""
+    """Manejar fotos de entregas y reportes - VERSIÓN MEJORADA"""
     try:
         user_id = message.from_user.id
         user_name = message.from_user.first_name
         file_id = message.photo[-1].file_id
         caption = message.caption if message.caption else ""
         
-        print(f"📸 Foto recibida de {user_name}: {caption}")
+        print(f"📸 Foto recibida de {user_name}: '{caption}'")
         
-        # EXTRAER NOMBRE DE PERSONA PRIMERO
-        persona_entregada = extraer_nombre_entrega(caption)
+        # 🆕 MEJOR DETECCIÓN DE TIPO
+        caption_lower = caption.lower()
         
-        # MEJORAR DETECCIÓN SI NO SE ENCONTRÓ NOMBRE
-        if any(word in caption.lower() for word in ['entregado', 'entregada', 'recibido', '✅']) and persona_entregada in ["Persona no identificada", "Entrega registrada"]:
-            persona_entregada = "Entrega confirmada (nombre no detectado)"
-        
-        # CLASIFICACIÓN DE TIPO DE FOTO
-        if any(word in caption.lower() for word in ['entregado', 'entregada', '✅', 'recibido']):
+        if any(word in caption_lower for word in ['entregado', 'entregada', '✅', 'recibido', 'acuse']):
             tipo = 'foto_acuse'
             carpeta = 'entregas'
-        elif any(word in caption.lower() for word in ['retrasado', 'problema', '⏳', '🚨']):
+            es_entrega = True
+        elif any(word in caption_lower for word in ['retrasado', 'problema', '⏳', 'estatus']):
             tipo = 'foto_estatus' 
             carpeta = 'estatus'
-        elif any(word in caption.lower() for word in ['incidente', 'tráfico', 'trafico', 'accidente']):
+            es_entrega = False
+        elif any(word in caption_lower for word in ['incidente', 'tráfico', 'trafico', 'accidente', '🚨']):
             tipo = 'foto_incidente'
             carpeta = 'incidentes'
+            es_entrega = False
         else:
             tipo = 'foto_general'
             carpeta = 'general'
+            es_entrega = False
 
-        print(f"🎯 CLASIFICACIÓN: '{caption}' → Carpeta: {carpeta}, Tipo: {tipo}")
+        print(f"🎯 CLASIFICACIÓN: '{caption}' → Carpeta: {carpeta}, Entrega: {es_entrega}")
         
         # DESCARGAR Y GUARDAR FOTO
         ruta_foto_local = descargar_foto_telegram(file_id, carpeta)
@@ -825,19 +889,22 @@ def manejar_fotos(message):
                 ruta_local=None
             )
 
-        # PROCESAR SEGÚN TIPO
-        if any(word in caption.lower() for word in ['entregado', 'entregada', '✅', 'recibido']):
-            print(f"🎯 Detectada entrega a: {persona_entregada}")
+        # 🆕 PROCESAR SEGÚN TIPO - CON MANEJO MEJORADO DE ERRORES
+        if es_entrega:
+            print(f"🎯 Detectada entrega, procesando...")
             procesar_entrega_con_foto(user_id, user_name, file_id, caption, ruta_foto_local)
         else:
+            print(f"🎯 Foto de reporte, procesando...")
             procesar_foto_reporte(user_id, user_name, file_id, caption, ruta_foto_local)
         
         print(f"📸 Procesamiento completado: {user_name} - Tipo: {tipo}")
         
     except Exception as e:
         print(f"❌ Error con foto: {e}")
+        traceback.print_exc()
         try:
-            bot.reply_to(message, "❌ Error procesando foto. Intenta nuevamente.")
+            # 🆕 MENSAJE SIMPLE SIN MARKDOWN
+            bot.reply_to(message, "❌ Error procesando foto. Intenta nuevamente.", parse_mode=None)
         except:
             pass
 
@@ -862,6 +929,10 @@ def manejar_todos_los_callbacks(call):
             manejar_callback_estatus(call)
         elif data.startswith('incidencia_'):
             manejar_callback_incidencia(call)
+        elif data.startswith('lista_completa_'):  # 🆕 NUEVO CALLBACK
+            manejar_callback_lista_completa(call)
+        elif data.startswith('volver_resumen_'):  # 🆕 CALLBACK PARA VOLVER
+            manejar_callback_volver_resumen(call)
         elif data == 'cancelar':
             bot.answer_callback_query(call.id, "❌ Acción cancelada")
             bot.delete_message(call.message.chat.id, call.message.message_id)
@@ -1010,6 +1081,104 @@ def manejar_callback_incidencia(call):
     except Exception as e:
         print(f"❌ Error en incidencia callback: {e}")
         bot.answer_callback_query(call.id, "❌ Error al procesar incidencia")
+
+def manejar_callback_lista_completa(call):
+    """Manejar clic en botón 'Ver Lista Completa'"""
+    try:
+        # Extraer ruta_id del callback data (ej: "lista_completa_5")
+        partes = call.data.split('_')
+        if len(partes) >= 3:
+            ruta_id = partes[2]
+        else:
+            ruta_id = "desconocida"
+        
+        user_id = call.from_user.id
+        
+        # Buscar la ruta
+        for archivo in os.listdir('rutas_telegram'):
+            if f"Ruta_{ruta_id}_" in archivo:
+                with open(f'rutas_telegram/{archivo}', 'r', encoding='utf-8') as f:
+                    ruta = json.load(f)
+                
+                mensaje = formatear_lista_completa(ruta)
+                
+                # Crear teclado con opciones
+                markup = types.InlineKeyboardMarkup()
+                markup.row(
+                    types.InlineKeyboardButton("📦 Registrar entrega", callback_data=f"entregar_{ruta_id}"),
+                    types.InlineKeyboardButton("🗺️ Abrir Maps", url=ruta['google_maps_url'])
+                )
+                markup.row(
+                    types.InlineKeyboardButton("📊 Volver al resumen", callback_data=f"volver_resumen_{ruta_id}"),
+                    types.InlineKeyboardButton("❌ Cerrar", callback_data="cancelar")
+                )
+                
+                bot.edit_message_text(
+                    chat_id=call.message.chat.id,
+                    message_id=call.message.message_id,
+                    text=mensaje,
+                    parse_mode='Markdown',
+                    reply_markup=markup
+                )
+                
+                bot.answer_callback_query(call.id, "👥 Mostrando lista completa...")
+                return
+        
+        bot.answer_callback_query(call.id, "❌ No se encontró la ruta")
+        
+    except Exception as e:
+        print(f"❌ Error en lista completa callback: {e}")
+        bot.answer_callback_query(call.id, "❌ Error al mostrar lista")
+
+def manejar_callback_volver_resumen(call):
+    """Manejar clic en botón 'Volver al resumen'"""
+    try:
+        # Extraer ruta_id del callback data (ej: "volver_resumen_5")
+        partes = call.data.split('_')
+        if len(partes) >= 3:
+            ruta_id = partes[2]
+        else:
+            ruta_id = "desconocida"
+        
+        user_id = call.from_user.id
+        
+        # Buscar la ruta
+        for archivo in os.listdir('rutas_telegram'):
+            if f"Ruta_{ruta_id}_" in archivo:
+                with open(f'rutas_telegram/{archivo}', 'r', encoding='utf-8') as f:
+                    ruta = json.load(f)
+                
+                mensaje = formatear_ruta_para_repartidor(ruta)
+                
+                markup = types.InlineKeyboardMarkup()
+                markup.row(
+                    types.InlineKeyboardButton("🗺️ Abrir en Maps", url=ruta['google_maps_url']),
+                    types.InlineKeyboardButton("👥 Ver Lista Completa", callback_data=f"lista_completa_{ruta_id}")
+                )
+                markup.row(
+                    types.InlineKeyboardButton("📦 Entregar", callback_data=f"entregar_{ruta_id}"),
+                    types.InlineKeyboardButton("📊 Estatus", callback_data=f"estatus_{ruta_id}")
+                )
+                markup.row(
+                    types.InlineKeyboardButton("🚨 Incidencia", callback_data=f"incidencia_{ruta_id}")
+                )
+                
+                bot.edit_message_text(
+                    chat_id=call.message.chat.id,
+                    message_id=call.message.message_id,
+                    text=mensaje,
+                    parse_mode='Markdown',
+                    reply_markup=markup
+                )
+                
+                bot.answer_callback_query(call.id, "📋 Volviendo al resumen...")
+                return
+        
+        bot.answer_callback_query(call.id, "❌ No se encontró la ruta")
+        
+    except Exception as e:
+        print(f"❌ Error en volver resumen callback: {e}")
+        bot.answer_callback_query(call.id, "❌ Error al volver al resumen")
 
 # =============================================================================
 # ENDPOINTS FLASK PARA SINCRONIZACIÓN
@@ -1162,6 +1331,65 @@ def webhook():
 @app.route('/')
 def index():
     return "🤖 Bot PJCDMX - Sistema de Rutas Automáticas 🚚"
+
+@app.route('/fotos/<path:filename>')
+def servir_foto(filename):
+    """Servir fotos directamente - PARA DEBUG"""
+    try:
+        # Buscar en diferentes ubicaciones
+        posibles_rutas = [
+            f'/tmp/carpeta_fotos_central/{filename}',
+            f'carpeta_fotos_central/{filename}',
+            f'/tmp/{filename}',
+            filename
+        ]
+        
+        for ruta in posibles_rutas:
+            if os.path.exists(ruta):
+                return send_file(ruta, mimetype='image/jpeg')
+        
+        return "Foto no encontrada", 404
+        
+    except Exception as e:
+        return f"Error: {str(e)}", 500
+
+@app.route('/api/ver_fotos')
+def ver_todas_las_fotos():
+    """Endpoint para ver todas las fotos guardadas"""
+    try:
+        cursor.execute('''
+            SELECT file_id, user_name, caption, tipo, ruta_local, timestamp, LENGTH(datos) as tamaño 
+            FROM fotos 
+            ORDER BY timestamp DESC
+        ''')
+        fotos = cursor.fetchall()
+        
+        resultado = "<h1>📸 Fotos en Sistema</h1>"
+        
+        for foto in fotos:
+            file_id, user_name, caption, tipo, ruta_local, timestamp, tamaño = foto
+            resultado += f"""
+            <div style="border: 1px solid #ccc; margin: 10px; padding: 10px;">
+                <h3>📷 {caption if caption else 'Sin descripción'}</h3>
+                <p><strong>Usuario:</strong> {user_name}</p>
+                <p><strong>Tipo:</strong> {tipo}</p>
+                <p><strong>Timestamp:</strong> {timestamp}</p>
+                <p><strong>Ruta local:</strong> {ruta_local}</p>
+                <p><strong>Tamaño datos:</strong> {tamaño} bytes</p>
+            """
+            
+            if ruta_local and os.path.exists(ruta_local):
+                resultado += f'<img src="/fotos/{os.path.basename(ruta_local)}" style="max-width: 300px;"><br>'
+                resultado += f'<a href="/fotos/{os.path.basename(ruta_local)}" target="_blank">🔗 Ver foto completa</a>'
+            else:
+                resultado += "<p>❌ Archivo no encontrado en disco</p>"
+            
+            resultado += "</div>"
+        
+        return resultado
+        
+    except Exception as e:
+        return f"<h1>Error: {str(e)}</h1>", 500
 
 # =============================================================================
 # INICIALIZACIÓN Y EJECUCIÓN
