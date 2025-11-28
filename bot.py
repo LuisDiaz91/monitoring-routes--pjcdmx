@@ -217,77 +217,71 @@ def cargar_rutas_disponibles():
     return len(RUTAS_DISPONIBLES)
     
 def formatear_ruta_para_repartidor(ruta):
-    """Formatear ruta de manera SEGURA (sin Markdown problemático)"""
+    """Resumen de ruta - 100% seguro sin Markdown"""
     try:
-        texto = "🗺️ RUTA ASIGNADA\n\n"
-        texto += f"ID: {ruta['ruta_id']}\n"
-        texto += f"Zona: {ruta['zona']}\n" 
+        texto = f"RUTA ASIGNADA - ID {ruta['ruta_id']}\n\n"
+        texto += f"Zona: {limpiar_texto_markdown(ruta['zona'])}\n"
         texto += f"Paradas: {len(ruta['paradas'])}\n"
         texto += f"Distancia: {ruta['estadisticas']['distancia_km']} km\n"
-        texto += f"Tiempo: {ruta['estadisticas']['tiempo_min']} min\n\n"
-        
+        texto += f"Tiempo estimado: {ruta['estadisticas']['tiempo_min']} min\n\n"
+
         entregadas = len([p for p in ruta['paradas'] if p.get('estado') == 'entregado'])
         texto += f"Progreso: {entregadas}/{len(ruta['paradas'])}\n\n"
-        
+
         texto += "Primeras 3 paradas:\n"
         for i, parada in enumerate(ruta['paradas'][:3], 1):
-            estado = "✅" if parada.get('estado') == 'entregado' else "📍"
-            # 🆕 LIMPIEZA EXTRA SEGURA
+            estado = "Entregado" if parada.get('estado') == 'entregado' else "Pendiente"
             nombre_limpio = limpiar_texto_markdown(parada['nombre'])
-            dependencia_limpia = limpiar_texto_markdown(parada.get('dependencia', ''))
-            
+            dep = limpiar_texto_markdown(parada.get('dependencia', '')[:30])
+
             texto += f"{estado} {parada['orden']}. {nombre_limpio}\n"
-            if dependencia_limpia:
-                texto += f"   🏢 {dependencia_limpia[:25]}...\n"
-        
+            if dep:
+                texto += f"   {dep}\n"
+
         if len(ruta['paradas']) > 3:
             texto += f"\n... y {len(ruta['paradas']) - 3} más\n"
-        
-        texto += "\n🚀 Usa /entregar para registrar entregas"
-        
+
+        texto += "\nUsa los botones para navegar"
+
         return texto
-        
+
     except Exception as e:
-        print(f"❌ Error formateando ruta: {e}")
-        return f"🗺️ Ruta {ruta['ruta_id']} - {ruta['zona']} ({len(ruta['paradas'])} paradas)"
+        return f"Ruta {ruta.get('ruta_id', '?')} - {ruta.get('zona', '?')} ({len(ruta.get('paradas', []))} paradas)"
         
 def formatear_lista_completa(ruta):
-    """Formatear lista completa de personas de manera SEGURA - VERSIÓN MEJORADA"""
+    """Formatear lista completa 100% segura - SIN MARKDOWN PROBLEMÁTICO"""
     try:
-        texto = f"👥 **LISTA COMPLETA - RUTA {ruta['ruta_id']}**\n\n"
-        texto += f"📍 Zona: {ruta['zona']}\n"
-        texto += f"📊 Total de personas: {len(ruta['paradas'])}\n\n"
-        
+        texto = f"LISTA COMPLETA - RUTA {ruta['ruta_id']}\n\n"
+        texto += f"Zona: {limpiar_texto_markdown(ruta['zona'])}\n"
+        texto += f"Total de personas: {len(ruta['paradas'])}\n\n"
+
         entregadas = 0
-        
         for parada in ruta['paradas']:
-            estado = "✅" if parada.get('estado') == 'entregado' else "📍"
-            
-            # 🆕 LIMPIEZA SEGURA EXTRA PARA EVITAR PROBLEMAS
+            estado = "Entregado" if parada.get('estado') == 'entregado' else "Pendiente"
             nombre_limpio = limpiar_texto_markdown(parada['nombre'])
-            dependencia_limpia = limpiar_texto_markdown(parada.get('dependencia', 'N/A'))
-            direccion_limpia = limpiar_texto_markdown(parada.get('direccion', 'N/A')[:30])
-            
-            texto += f"{estado} **{parada['orden']}. {nombre_limpio}**\n"
-            texto += f"   🏢 {dependencia_limpia}\n"
-            texto += f"   📍 {direccion_limpia}...\n"
-            
+            dependencia = limpiar_texto_markdown(parada.get('dependencia', 'N/A'))
+            direccion = limpiar_texto_markdown(parada.get('direccion', '')[:40])
+
+            texto += f"{estado} {parada['orden']}. {nombre_limpio}\n"
+            if dependencia and dependencia != 'N/A':
+                texto += f"   {dependencia}\n"
+            if direccion:
+                texto += f"   {direccion}...\n"
+
             if parada.get('estado') == 'entregado':
                 entregadas += 1
-                timestamp = parada.get('timestamp_entrega', '')
-                if timestamp:
-                    texto += f"   🕒 {timestamp[:16]}\n"
-            
+                ts = parada.get('timestamp_entrega', '')[:16].replace('T', ' ')
+                if ts:
+                    texto += f"   Entregado: {ts}\n"
             texto += "\n"
-        
-        texto += f"📈 **Progreso: {entregadas}/{len(ruta['paradas'])} entregadas**"
-        
+
+        texto += f"Progreso: {entregadas}/{len(ruta['paradas'])} entregadas"
+
         return texto
-        
+
     except Exception as e:
-        print(f"❌ Error formateando lista completa: {e}")
-        # 🆕 FALLBACK SEGURO
-        return f"👥 LISTA COMPLETA - Ruta {ruta.get('ruta_id', 'N/A')}\n\nError al generar lista: {str(e)}"
+        print(f"Error formateando lista completa: {e}")
+        return f"LISTA COMPLETA Ruta {ruta.get('ruta_id', 'N/A')} - {len(ruta.get('paradas', []))} paradas"
         
 def registrar_avance_pendiente(datos_avance):
     """🆕 Registrar un nuevo avance pendiente - VERSIÓN MEJORADA"""
