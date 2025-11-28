@@ -217,53 +217,61 @@ def cargar_rutas_disponibles():
     return len(RUTAS_DISPONIBLES)
     
 def formatear_ruta_para_repartidor(ruta):
-    """Resumen de ruta - 100% seguro sin Markdown"""
     try:
-        texto = f"RUTA ASIGNADA - ID {ruta['ruta_id']}\n\n"
-        texto += f"Zona: {limpiar_texto_markdown(ruta['zona'])}\n"
-        texto += f"Paradas: {len(ruta['paradas'])}\n"
-        texto += f"Distancia: {ruta['estadisticas']['distancia_km']} km\n"
-        texto += f"Tiempo estimado: {ruta['estadisticas']['tiempo_min']} min\n\n"
+        texto = f"RUTA ASIGNADA - ID {ruta.get('ruta_id', '?')}\n\n"
+        texto += f"Zona: {limpiar_texto_markdown(ruta.get('zona', 'Sin zona'))}\n"
+        texto += f"Paradas: {len(ruta.get('paradas', []))}\n"
+        texto += f"Distancia: {ruta.get('estadisticas', {}).get('distancia_km', '?')} km\n"
+        texto += f"Tiempo: {ruta.get('estadisticas', {}).get('tiempo_min', '?')} min\n\n"
 
-        entregadas = len([p for p in ruta['paradas'] if p.get('estado') == 'entregado'])
-        texto += f"Progreso: {entregadas}/{len(ruta['paradas'])}\n\n"
-
+        entregadas = len([p for p in ruta.get('paradas', []) if p.get('estado') == 'entregado'])
+        texto += f"Progreso: {entregadas}/{len(ruta.get('paradas', []))}\n\n"
         texto += "Primeras 3 paradas:\n"
-        for i, parada in enumerate(ruta['paradas'][:3], 1):
+
+        for i, parada in enumerate(ruta.get('paradas', [])[:3], 1):
+            nombre = parada.get('nombre', f"Persona {i}")
+            if not nombre or nombre.strip() == "":
+                nombre = f"Persona {i} (sin nombre)"
             estado = "Entregado" if parada.get('estado') == 'entregado' else "Pendiente"
-            nombre_limpio = limpiar_texto_markdown(parada['nombre'])
+            orden = parada.get('orden', i)
             dep = limpiar_texto_markdown(parada.get('dependencia', '')[:30])
 
-            texto += f"{estado} {parada['orden']}. {nombre_limpio}\n"
+            texto += f"{estado} {orden}. {limpiar_texto_markdown(nombre)}\n"
             if dep:
                 texto += f"   {dep}\n"
 
-        if len(ruta['paradas']) > 3:
-            texto += f"\n... y {len(ruta['paradas']) - 3} más\n"
+        if len(ruta.get('paradas', [])) > 3:
+            texto += f"\n... y {len(ruta.get('paradas', [])) - 3} más\n"
 
         texto += "\nUsa los botones para navegar"
-
         return texto
 
     except Exception as e:
-        return f"Ruta {ruta.get('ruta_id', '?')} - {ruta.get('zona', '?')} ({len(ruta.get('paradas', []))} paradas)"
+        return f"Ruta {ruta.get('ruta_id', '?')} - {ruta.get('zona', '?')}"
         
 def formatear_lista_completa(ruta):
-    """Formatear lista completa 100% segura - SIN MARKDOWN PROBLEMÁTICO"""
+    """Lista completa - 100% segura aunque falte 'nombre' o cualquier campo"""
     try:
-        texto = f"LISTA COMPLETA - RUTA {ruta['ruta_id']}\n\n"
-        texto += f"Zona: {limpiar_texto_markdown(ruta['zona'])}\n"
-        texto += f"Total de personas: {len(ruta['paradas'])}\n\n"
+        texto = f"LISTA COMPLETA - RUTA {ruta.get('ruta_id', 'ID?')}\n\n"
+        texto += f"Zona: {limpiar_texto_markdown(ruta.get('zona', 'Sin zona'))}\n"
+        texto += f"Total: {len(ruta.get('paradas', []))} paradas\n\n"
 
         entregadas = 0
-        for parada in ruta['paradas']:
+        for i, parada in enumerate(ruta.get('paradas', []), 1):
+            # === PROTECCIÓN TOTAL CONTRA CAMPOS FALTANTES ===
+            nombre = parada.get('nombre', f"Persona {i} (sin nombre)")
+            if not nombre or nombre.strip() == "":
+                nombre = f"Persona {i} (sin nombre en lista)"
+
             estado = "Entregado" if parada.get('estado') == 'entregado' else "Pendiente"
-            nombre_limpio = limpiar_texto_markdown(parada['nombre'])
-            dependencia = limpiar_texto_markdown(parada.get('dependencia', 'N/A'))
+            orden = parada.get('orden', i)
+            dependencia = limpiar_texto_markdown(parada.get('dependencia', '')[:40])
             direccion = limpiar_texto_markdown(parada.get('direccion', '')[:40])
 
-            texto += f"{estado} {parada['orden']}. {nombre_limpio}\n"
-            if dependencia and dependencia != 'N/A':
+            nombre_limpio = limpiar_texto_markdown(nombre)
+
+            texto += f"{estado} {orden}. {nombre_limpio}\n"
+            if dependencia:
                 texto += f"   {dependencia}\n"
             if direccion:
                 texto += f"   {direccion}...\n"
@@ -275,13 +283,12 @@ def formatear_lista_completa(ruta):
                     texto += f"   Entregado: {ts}\n"
             texto += "\n"
 
-        texto += f"Progreso: {entregadas}/{len(ruta['paradas'])} entregadas"
-
+        texto += f"Progreso: {entregadas}/{len(ruta.get('paradas', []))} entregadas"
         return texto
 
     except Exception as e:
         print(f"Error formateando lista completa: {e}")
-        return f"LISTA COMPLETA Ruta {ruta.get('ruta_id', 'N/A')} - {len(ruta.get('paradas', []))} paradas"
+        return f"LISTA COMPLETA Ruta {ruta.get('ruta_id', '?')} - Error de datos"
         
 def registrar_avance_pendiente(datos_avance):
     """🆕 Registrar un nuevo avance pendiente - VERSIÓN MEJORADA"""
