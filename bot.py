@@ -145,19 +145,53 @@ def descargar_foto_telegram(file_id, tipo_foto="general"):
     
     return None
 
-def guardar_foto_en_bd(file_id, user_id, user_name, caption, tipo, datos_imagen=None, ruta_local=None):
-    """Guardar foto en base de datos con metadatos"""
+def guardar_foto_completa(file_id, user_id, user_name, caption, tipo, ruta_foto_local=None):
+    """Guardar foto con datos binarios completos - VERSIÓN MEJORADA"""
     try:
+        datos_imagen = None
+        
+        # 1. Intentar leer del archivo local si existe
+        if ruta_foto_local and os.path.exists(ruta_foto_local):
+            with open(ruta_foto_local, 'rb') as f:
+                datos_imagen = f.read()
+            print(f"✅ Foto leída desde archivo: {len(datos_imagen)} bytes")
+        
+        # 2. Si no hay archivo local, descargar de Telegram
+        if not datos_imagen:
+            print(f"🔄 Descargando foto de Telegram: {file_id}")
+            file_info = bot.get_file(file_id)
+            if file_info and file_info.file_path:
+                file_url = f"https://api.telegram.org/file/bot{TOKEN}/{file_info.file_path}"
+                response = requests.get(file_url, timeout=30)
+                if response.status_code == 200:
+                    datos_imagen = response.content
+                    print(f"✅ Foto descargada de Telegram: {len(datos_imagen)} bytes")
+                    
+                    # Guardar localmente también
+                    if not ruta_foto_local:
+                        carpeta = f"carpeta_fotos_central/{tipo}"
+                        os.makedirs(carpeta, exist_ok=True)
+                        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+                        ruta_foto_local = f"{carpeta}/foto_{timestamp}.jpg"
+                    
+                    with open(ruta_foto_local, 'wb') as f:
+                        f.write(datos_imagen)
+                    print(f"💾 Foto guardada localmente: {ruta_foto_local}")
+        
+        # 3. Guardar en base de datos
         cursor.execute('''
             INSERT OR REPLACE INTO fotos 
             (file_id, user_id, user_name, caption, tipo, datos, ruta_local, timestamp)
             VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-        ''', (file_id, user_id, user_name, caption, tipo, datos_imagen, ruta_local))
+        ''', (file_id, user_id, user_name, caption, tipo, datos_imagen, ruta_foto_local))
+        
         conn.commit()
-        print(f"✅ Foto guardada en BD: {file_id} - Tipo: {tipo}")
+        
+        print(f"✅ Foto guardada en BD: {file_id} - Tipo: {tipo} - Datos: {len(datos_imagen) if datos_imagen else 0} bytes")
         return True
+        
     except Exception as e:
-        print(f"❌ Error guardando foto en BD: {e}")
+        print(f"❌ Error guardando foto completa: {e}")
         return False
 
 def cargar_rutas_disponibles():
@@ -674,6 +708,201 @@ def actualizar_excel_desde_entrega(ruta_id, persona_entregada, ruta_foto, repart
         return False
 
 # =============================================================================
+# 📍 SISTEMA DE UBICACIÓN EN TIEMPO REAL
+# =============================================================================
+
+@manejar_errores_telegram
+@bot.message_handler(commands=['ubicacion'])
+def solicitar_ubicacion(message):
+    """Solicitar al usuario que comparta su ubicación"""
+    try:
+        user_id = message.from_user.id
+        user_name = message.from_user.first_name
+        
+        print(f"📍 Solicitando ubicación de {user_name} (ID: {user_id})")
+        
+        markup = types.ReplyKeyboardMarkup(
+            row_width=1, 
+            resize_keyboard=True, 
+            one_time_keyboard=True
+        )
+        
+        btn_ubicacion = types.KeyboardButton("📍 Compartir mi ubicación", request_location=True)
+        btn_cancelar = types.KeyboardButton("❌ Cancelar")
+        markup.add(btn_ubicacion, btn_cancelar)
+        
+        mensaje = (
+            "📍 **COMPARTIR UBICACIÓN EN TIEMPO REAL**\n\n"
+            "Por favor comparte tu ubicación actual para:\n\n"
+            "• 🗺️ Seguimiento en tiempo real\n"
+            "• 📊 Optimización de rutas\n"
+            "• 🚨 Respuesta rápida en emergencias\n\n"
+            "⚠️ **Tu ubicación solo será visible para el supervisor**"
+        )
+        
+        bot.send_message(
+            user_id, 
+            mensaje, 
+            parse_mode='Markdown',
+            reply_markup=markup
+        )
+        
+    except Exception as e:
+        print(f"❌ Error solicitando ubicación: {e}")
+        bot.reply_to(message, "❌ Error al solicitar ubicación")
+
+@manejar_errores_telegram
+@bot.message_handler(content_types=['location'])
+def manejar_ubicacion(message):
+    """Manejar ubicación recibida del usuario"""
+    try:
+        user_id = message.from_user.id
+        user_name = message.from_user.first_name
+        location = message.location
+        
+        latitud = location.latitude
+        longitud = location.longitude
+        
+        print(f"📍 Ubicación recibida de {user_name}: {latitud}, {longitud}")
+        
+        # Guardar ubicación en base de datos
+        cursor.execute('''
+            INSERT INTO incidentes 
+            (user_id, user_name, tipo, descripcion, ubicacion, timestamp)
+            VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        ''', (user_id, user_name, 'ubicacion', 'Ubicación en tiempo real', f"{latitud},{longitud}"))
+        
+        conn.commit()
+        
+        # Crear mensaje de respuesta
+        mensaje = (
+            "✅ **UBICACIÓN REGISTRADA**\n\n"
+            f"📍 **Coordenadas:**\n"
+            f"• Latitud: `{latitud}`\n"
+            f"• Longitud: `{longitud}`\n\n"
+            f"🗺️ **Ver en Google Maps:**\n"
+            f"https://www.google.com/maps?q={latitud},{longitud}\n\n"
+            f"👤 **Usuario:** {user_name}\n"
+            f"🕒 **Hora:** {datetime.now().strftime('%H:%M:%S')}\n\n"
+            "📊 _Tu ubicación ha sido registrada en el sistema_"
+        )
+        
+        # Crear teclado inline con opciones
+        markup = types.InlineKeyboardMarkup()
+        markup.row(
+            types.InlineKeyboardButton(
+                "🗺️ Abrir en Maps", 
+                url=f"https://www.google.com/maps?q={latitud},{longitud}"
+            ),
+            types.InlineKeyboardButton(
+                "📱 Compartir ruta", 
+                url=f"https://www.google.com/maps/dir/?api=1&destination={latitud},{longitud}"
+            )
+        )
+        markup.row(
+            types.InlineKeyboardButton("📍 Nueva ubicación", callback_data="nueva_ubicacion"),
+            types.InlineKeyboardButton("❌ Cerrar", callback_data="cerrar_ubicacion")
+        )
+        
+        # Enviar mensaje con teclado
+        bot.send_message(
+            user_id,
+            mensaje,
+            parse_mode='Markdown',
+            reply_markup=markup
+        )
+        
+        # 🆕 NOTIFICAR A SUPERVISORES
+        notificar_supervisores_ubicacion(user_name, latitud, longitud)
+        
+        print(f"✅ Ubicación guardada: {user_name} - {latitud}, {longitud}")
+        
+    except Exception as e:
+        print(f"❌ Error manejando ubicación: {e}")
+        bot.reply_to(message, "❌ Error al procesar ubicación")
+
+def notificar_supervisores_ubicacion(user_name, latitud, longitud):
+    """Notificar a supervisores sobre nueva ubicación"""
+    try:
+        mensaje_supervisor = (
+            "📍 **NUEVA UBICACIÓN REGISTRADA**\n\n"
+            f"👤 **Repartidor:** {user_name}\n"
+            f"📍 **Coordenadas:** {latitud}, {longitud}\n"
+            f"🕒 **Hora:** {datetime.now().strftime('%H:%M:%S')}\n\n"
+            f"🗺️ **Ver en mapa:**\n"
+            f"https://www.google.com/maps?q={latitud},{longitud}"
+        )
+        
+        # Notificar a todos los administradores
+        for admin_id in ADMIN_IDS:
+            try:
+                bot.send_message(
+                    admin_id,
+                    mensaje_supervisor,
+                    parse_mode='Markdown'
+                )
+                print(f"✅ Supervisor notificado: {admin_id}")
+            except Exception as e:
+                print(f"❌ Error notificando supervisor {admin_id}: {e}")
+                
+    except Exception as e:
+        print(f"❌ Error en notificación a supervisores: {e}")
+
+@manejar_errores_telegram
+@bot.message_handler(func=lambda message: message.text == "📍 Compartir mi ubicación")
+def manejar_boton_ubicacion(message):
+    """Manejar clic en el botón de ubicación del teclado"""
+    try:
+        user_id = message.from_user.id
+        user_name = message.from_user.first_name
+        
+        print(f"📍 Botón de ubicación presionado por {user_name}")
+        
+        # Eliminar teclado
+        markup = types.ReplyKeyboardRemove()
+        
+        mensaje = (
+            "📍 **LISTO PARA RECIBIR UBICACIÓN**\n\n"
+            "Por favor usa el botón de 📎 (clip) y selecciona \"Ubicación\" "
+            "para compartir tu ubicación actual.\n\n"
+            "O presiona el botón de ubicación en la barra de herramientas."
+        )
+        
+        bot.send_message(
+            user_id,
+            mensaje,
+            parse_mode='Markdown',
+            reply_markup=markup
+        )
+        
+    except Exception as e:
+        print(f"❌ Error manejando botón ubicación: {e}")
+
+@manejar_errores_telegram
+@bot.message_handler(func=lambda message: message.text == "❌ Cancelar")
+def manejar_cancelar_ubicacion(message):
+    """Manejar cancelación de compartir ubicación"""
+    try:
+        user_id = message.from_user.id
+        user_name = message.from_user.first_name
+        
+        print(f"❌ Ubicación cancelada por {user_name}")
+        
+        # Eliminar teclado
+        markup = types.ReplyKeyboardRemove()
+        
+        mensaje = "❌ Compartir ubicación cancelado."
+        
+        bot.send_message(
+            user_id,
+            mensaje,
+            reply_markup=markup
+        )
+        
+    except Exception as e:
+        print(f"❌ Error cancelando ubicación: {e}")
+
+# =============================================================================
 # HANDLERS DE TELEGRAM (MANTENER LOS QUE YA TIENES)
 # =============================================================================
 
@@ -690,9 +919,9 @@ def enviar_bienvenida(message):
 /solicitar_ruta - 🗺️ Obtener ruta automáticamente
 /miruta - 📋 Ver mi ruta asignada  
 /entregar - 📦 Registrar entrega completada
+/ubicacion - 📍 Compartir ubicación en tiempo real
 
 📊 REPORTES Y SEGUIMIENTO:
-/ubicacion - 📍 Enviar ubicación actual
 /incidente - 🚨 Reportar incidente
 /foto - 📸 Enviar foto del incidente
 /estatus - 📈 Actualizar estado de entrega
@@ -756,6 +985,7 @@ def solicitar_ruta_automatica(message):
             types.InlineKeyboardButton("📊 Estatus", callback_data=f"estatus_{ruta_id}")
         )
         markup.row(
+            types.InlineKeyboardButton("📍 Ubicación", callback_data="nueva_ubicacion"),
             types.InlineKeyboardButton("🚨 Incidencia", callback_data=f"incidencia_{ruta_id}")
         )
         
@@ -795,9 +1025,18 @@ def ver_mi_ruta(message):
                 
                 mensaje = formatear_ruta_para_repartidor(ruta)
                 markup = types.InlineKeyboardMarkup()
-                btn_maps = types.InlineKeyboardButton("🗺️ Abrir en Google Maps", url=ruta['google_maps_url'])
-                btn_lista = types.InlineKeyboardButton("👥 Ver Lista Completa", callback_data=f"lista_completa_{ruta_id}")
-                markup.add(btn_maps, btn_lista)
+                markup.row(
+                    types.InlineKeyboardButton("🗺️ Abrir en Maps", url=ruta['google_maps_url']),
+                    types.InlineKeyboardButton("👥 Ver Lista Completa", callback_data=f"lista_completa_{ruta_id}")
+                )
+                markup.row(
+                    types.InlineKeyboardButton("📦 Entregar", callback_data=f"entregar_{ruta_id}"),
+                    types.InlineKeyboardButton("📊 Estatus", callback_data=f"estatus_{ruta_id}")
+                )
+                markup.row(
+                    types.InlineKeyboardButton("📍 Ubicación", callback_data="nueva_ubicacion"),
+                    types.InlineKeyboardButton("🚨 Incidencia", callback_data=f"incidencia_{ruta_id}")
+                )
                 
                 try:
                     bot.reply_to(message, mensaje, parse_mode='Markdown', reply_markup=markup)
@@ -821,7 +1060,7 @@ def ver_mi_ruta(message):
 @manejar_errores_telegram   
 @bot.message_handler(content_types=['photo'])
 def manejar_fotos(message):
-    """Manejar fotos de entregas y reportes - VERSIÓN MEJORADA"""
+    """Manejar fotos de entregas y reportes - VERSIÓN MEJORADA CON DATOS COMPLETOS"""
     try:
         user_id = message.from_user.id
         user_name = message.from_user.first_name
@@ -830,7 +1069,7 @@ def manejar_fotos(message):
         
         print(f"📸 Foto recibida de {user_name}: '{caption}'")
         
-        # 🆕 MEJOR DETECCIÓN DE TIPO
+        # Detección de tipo
         caption_lower = caption.lower()
         
         if any(word in caption_lower for word in ['entregado', 'entregada', '✅', 'recibido', 'acuse']):
@@ -852,36 +1091,20 @@ def manejar_fotos(message):
 
         print(f"🎯 CLASIFICACIÓN: '{caption}' → Carpeta: {carpeta}, Entrega: {es_entrega}")
         
-        # DESCARGAR Y GUARDAR FOTO
+        # DESCARGAR Y GUARDAR FOTO COMPLETA
         ruta_foto_local = descargar_foto_telegram(file_id, carpeta)
         
-        if ruta_foto_local:
-            with open(ruta_foto_local, 'rb') as f:
-                datos_imagen = f.read()
-            
-            guardar_foto_en_bd(
-                file_id=file_id,
-                user_id=user_id,
-                user_name=user_name,
-                caption=caption,
-                tipo=tipo,
-                datos_imagen=datos_imagen,
-                ruta_local=ruta_foto_local
-            )
-            print(f"✅ Foto guardada en BD y carpeta: {carpeta}")
-        else:
-            print("⚠️ Error descargando foto, guardando solo referencia en BD")
-            guardar_foto_en_bd(
-                file_id=file_id,
-                user_id=user_id,
-                user_name=user_name,
-                caption=caption,
-                tipo=tipo,
-                datos_imagen=None,
-                ruta_local=None
-            )
+        # 🆕 USAR LA NUEVA FUNCIÓN QUE GUARDA DATOS BINARIOS
+        guardar_foto_completa(
+            file_id=file_id,
+            user_id=user_id,
+            user_name=user_name,
+            caption=caption,
+            tipo=tipo,
+            ruta_foto_local=ruta_foto_local
+        )
 
-        # 🆕 PROCESAR SEGÚN TIPO - CON MANEJO MEJORADO DE ERRORES
+        # PROCESAR SEGÚN TIPO
         if es_entrega:
             print(f"🎯 Detectada entrega, procesando...")
             procesar_entrega_con_foto(user_id, user_name, file_id, caption, ruta_foto_local)
@@ -889,13 +1112,25 @@ def manejar_fotos(message):
             print(f"🎯 Foto de reporte, procesando...")
             procesar_foto_reporte(user_id, user_name, file_id, caption, ruta_foto_local)
         
+        # 🆕 INFORMAR AL USUARIO CON ENLACE A LA FOTO
+        try:
+            foto_url = f"https://{os.environ.get('RAILWAY_STATIC_URL', 'tu-url-railway')}/api/fotos/{file_id}"
+            mensaje_extra = f"\n\n📎 Enlace permanente: {foto_url}"
+            
+            if es_entrega:
+                bot.send_message(user_id, f"✅ Entrega registrada.{mensaje_extra}", parse_mode=None)
+            else:
+                bot.send_message(user_id, f"✅ Reporte con foto guardado.{mensaje_extra}", parse_mode=None)
+                
+        except Exception as e:
+            print(f"⚠️ No se pudo enviar enlace de foto: {e}")
+        
         print(f"📸 Procesamiento completado: {user_name} - Tipo: {tipo}")
         
     except Exception as e:
         print(f"❌ Error con foto: {e}")
         traceback.print_exc()
         try:
-            # 🆕 MENSAJE SIMPLE SIN MARKDOWN
             bot.reply_to(message, "❌ Error procesando foto. Intenta nuevamente.", parse_mode=None)
         except:
             pass
@@ -1168,6 +1403,7 @@ def manejar_callback_volver_resumen(call):
                     types.InlineKeyboardButton("📊 Estatus", callback_data=f"estatus_{ruta_id}")
                 )
                 markup.row(
+                    types.InlineKeyboardButton("📍 Ubicación", callback_data="nueva_ubicacion"),
                     types.InlineKeyboardButton("🚨 Incidencia", callback_data=f"incidencia_{ruta_id}")
                 )
                 
@@ -1264,6 +1500,60 @@ def manejar_callback_contactar_supervisor(call):
         print(f"❌ Error en contacto supervisor: {e}")
         bot.answer_callback_query(call.id, "❌ Error al contactar")
 
+def manejar_callback_nueva_ubicacion(call):
+    """Manejar solicitud de nueva ubicación"""
+    try:
+        user_id = call.from_user.id
+        user_name = call.from_user.first_name
+        
+        print(f"📍 Nueva ubicación solicitada por {user_name}")
+        
+        # Eliminar mensaje anterior
+        bot.delete_message(call.message.chat.id, call.message.message_id)
+        
+        # Solicitar ubicación nuevamente
+        markup = types.ReplyKeyboardMarkup(
+            row_width=1, 
+            resize_keyboard=True, 
+            one_time_keyboard=True
+        )
+        
+        btn_ubicacion = types.KeyboardButton("📍 Compartir mi ubicación", request_location=True)
+        btn_cancelar = types.KeyboardButton("❌ Cancelar")
+        markup.add(btn_ubicacion, btn_cancelar)
+        
+        mensaje = (
+            "📍 **COMPARTIR UBICACIÓN EN TIEMPO REAL**\n\n"
+            "Por favor comparte tu ubicación actual para:\n\n"
+            "• 🗺️ Seguimiento en tiempo real\n"
+            "• 📊 Optimización de rutas\n"
+            "• 🚨 Respuesta rápida en emergencias\n\n"
+            "⚠️ **Tu ubicación solo será visible para el supervisor**"
+        )
+        
+        bot.send_message(
+            user_id, 
+            mensaje, 
+            parse_mode='Markdown',
+            reply_markup=markup
+        )
+        
+        bot.answer_callback_query(call.id, "📍 Solicitando nueva ubicación...")
+        
+    except Exception as e:
+        print(f"❌ Error en nueva ubicación callback: {e}")
+        bot.answer_callback_query(call.id, "❌ Error al solicitar ubicación")
+
+def manejar_callback_cerrar_ubicacion(call):
+    """Manejar cierre de mensaje de ubicación"""
+    try:
+        bot.delete_message(call.message.chat.id, call.message.message_id)
+        bot.answer_callback_query(call.id, "✅ Mensaje cerrado")
+        
+    except Exception as e:
+        print(f"❌ Error cerrando ubicación: {e}")
+        bot.answer_callback_query(call.id, "❌ Error al cerrar")
+
 @bot.callback_query_handler(func=lambda call: True)
 def manejar_todos_los_callbacks(call):
     """Manejar TODOS los clics en botones inline"""
@@ -1285,9 +1575,13 @@ def manejar_todos_los_callbacks(call):
             manejar_callback_lista_completa(call)
         elif data.startswith('volver_resumen_'): 
             manejar_callback_volver_resumen(call)
-        # 🆕 NUEVO: Handler para botón "Subir foto ahora"
         elif data.startswith('foto_'):
             manejar_callback_foto_entrega(call)
+        # 🆕 NUEVOS CALLBACKS DE UBICACIÓN
+        elif data == 'nueva_ubicacion':
+            manejar_callback_nueva_ubicacion(call)
+        elif data == 'cerrar_ubicacion':
+            manejar_callback_cerrar_ubicacion(call)
         elif data == 'incidencia_trafico':
             manejar_callback_incidencia_trafico(call)
         elif data == 'incidencia_vehicular':
@@ -1322,6 +1616,7 @@ def manejar_todos_los_callbacks(call):
                                 types.InlineKeyboardButton("📊 Estatus", callback_data=f"estatus_{ruta_id}")
                             )
                             markup.row(
+                                types.InlineKeyboardButton("📍 Ubicación", callback_data="nueva_ubicacion"),
                                 types.InlineKeyboardButton("🚨 Incidencia", callback_data=f"incidencia_{ruta_id}")
                             )
                             
@@ -1347,6 +1642,187 @@ def manejar_todos_los_callbacks(call):
             bot.answer_callback_query(call.id, "❌ Error procesando comando")
         except:
             pass
+
+# =============================================================================
+# 🆕 SISTEMA DE VISUALIZACIÓN DE FOTOS REALES
+# =============================================================================
+
+@app.route('/api/fotos/<file_id>')
+def servir_foto_por_id(file_id):
+    """Servir foto real por file_id de Telegram"""
+    try:
+        print(f"🖼️ Solicitando foto con file_id: {file_id}")
+        
+        # Buscar en la base de datos
+        cursor.execute('''
+            SELECT file_id, datos, ruta_local, caption, user_name, timestamp 
+            FROM fotos WHERE file_id = ?
+        ''', (file_id,))
+        
+        foto = cursor.fetchone()
+        
+        if not foto:
+            return jsonify({"error": "Foto no encontrada"}), 404
+            
+        file_id, datos_imagen, ruta_local, caption, user_name, timestamp = foto
+        
+        # Prioridad 1: Datos binarios directos de la BD
+        if datos_imagen:
+            print(f"✅ Sirviendo foto desde BD: {file_id} - {len(datos_imagen)} bytes")
+            return Response(datos_imagen, mimetype='image/jpeg')
+        
+        # Prioridad 2: Archivo local en disco
+        if ruta_local and os.path.exists(ruta_local):
+            print(f"✅ Sirviendo foto desde archivo: {ruta_local}")
+            return send_file(ruta_local, mimetype='image/jpeg')
+        
+        # Prioridad 3: Descargar de Telegram nuevamente
+        try:
+            print(f"🔄 Intentando descargar foto desde Telegram: {file_id}")
+            file_info = bot.get_file(file_id)
+            if file_info and file_info.file_path:
+                file_url = f"https://api.telegram.org/file/bot{TOKEN}/{file_info.file_path}"
+                response = requests.get(file_url, timeout=30)
+                if response.status_code == 200:
+                    print(f"✅ Foto descargada de Telegram: {len(response.content)} bytes")
+                    return Response(response.content, mimetype='image/jpeg')
+        except Exception as e:
+            print(f"❌ Error descargando de Telegram: {e}")
+        
+        return jsonify({"error": "No se pudo obtener la foto"}), 404
+        
+    except Exception as e:
+        print(f"❌ Error sirviendo foto: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/fotos_usuario/<int:user_id>')
+def listar_fotos_usuario(user_id):
+    """Listar todas las fotos de un usuario específico"""
+    try:
+        cursor.execute('''
+            SELECT file_id, caption, tipo, ruta_local, timestamp, LENGTH(datos) as tamaño
+            FROM fotos 
+            WHERE user_id = ? 
+            ORDER BY timestamp DESC
+        ''', (user_id,))
+        
+        fotos = cursor.fetchall()
+        
+        resultado = {
+            "status": "success",
+            "user_id": user_id,
+            "total_fotos": len(fotos),
+            "fotos": []
+        }
+        
+        for foto in fotos:
+            file_id, caption, tipo, ruta_local, timestamp, tamaño = foto
+            
+            foto_info = {
+                "file_id": file_id,
+                "caption": caption,
+                "tipo": tipo,
+                "timestamp": timestamp,
+                "tamaño_bytes": tamaño,
+                "url_directa": f"/api/fotos/{file_id}",
+                "tiene_datos": tamaño > 0,
+                "tiene_archivo": ruta_local and os.path.exists(ruta_local)
+            }
+            resultado["fotos"].append(foto_info)
+        
+        return jsonify(resultado)
+        
+    except Exception as e:
+        return jsonify({"status": "error", "error": str(e)}), 500
+
+@app.route('/galeria_fotos')
+def galeria_fotos_interactiva():
+    """Galería web interactiva para ver todas las fotos"""
+    try:
+        cursor.execute('''
+            SELECT file_id, user_name, caption, tipo, ruta_local, timestamp, LENGTH(datos) as tamaño 
+            FROM fotos 
+            ORDER BY timestamp DESC
+            LIMIT 50
+        ''')
+        fotos = cursor.fetchall()
+        
+        html = """
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>📸 Galería de Fotos - Sistema PJCDMX</title>
+            <meta charset="utf-8">
+            <style>
+                body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }
+                .header { background: #2c3e50; color: white; padding: 20px; border-radius: 10px; margin-bottom: 20px; }
+                .foto-container { 
+                    background: white; margin: 15px; padding: 15px; border-radius: 10px; 
+                    box-shadow: 0 2px 5px rgba(0,0,0,0.1); display: inline-block; width: 300px; vertical-align: top;
+                }
+                .foto-img { max-width: 100%; height: auto; border-radius: 5px; }
+                .foto-info { margin-top: 10px; font-size: 14px; }
+                .foto-caption { font-weight: bold; margin: 5px 0; }
+                .foto-meta { color: #666; font-size: 12px; }
+                .estado { padding: 2px 8px; border-radius: 3px; font-size: 11px; }
+                .estado-datos { background: #27ae60; color: white; }
+                .estado-archivo { background: #3498db; color: white; }
+                .estado-sin { background: #e74c3c; color: white; }
+            </style>
+        </head>
+        <body>
+            <div class="header">
+                <h1>📸 Galería de Fotos - Sistema PJCDMX</h1>
+                <p>Total de fotos en sistema: <strong>%d</strong></p>
+            </div>
+        """ % len(fotos)
+        
+        for foto in fotos:
+            file_id, user_name, caption, tipo, ruta_local, timestamp, tamaño = foto
+            
+            # Determinar estados
+            tiene_datos = tamaño > 0
+            tiene_archivo = ruta_local and os.path.exists(ruta_local)
+            
+            html += f"""
+            <div class="foto-container">
+                <img src="/api/fotos/{file_id}" class="foto-img" 
+                     onerror="this.src='https://via.placeholder.com/300x200?text=Foto+no+disponible'">
+                
+                <div class="foto-info">
+                    <div class="foto-caption">{caption if caption else 'Sin descripción'}</div>
+                    <div class="foto-meta">
+                        <strong>👤 Usuario:</strong> {user_name}<br>
+                        <strong>📁 Tipo:</strong> {tipo}<br>
+                        <strong>🕒 Fecha:</strong> {timestamp}<br>
+                        <strong>📊 Tamaño:</strong> {tamaño} bytes
+                    </div>
+                    <div style="margin-top: 8px;">
+                        <span class="estado {'estado-datos' if tiene_datos else 'estado-sin'}">
+                            {'✅ BD' if tiene_datos else '❌ BD'}
+                        </span>
+                        <span class="estado {'estado-archivo' if tiene_archivo else 'estado-sin'}">
+                            {'✅ Archivo' if tiene_archivo else '❌ Archivo'}
+                        </span>
+                    </div>
+                    <div style="margin-top: 8px;">
+                        <a href="/api/fotos/{file_id}" target="_blank" style="color: #3498db; text-decoration: none;">
+                            🔗 Ver foto completa
+                        </a>
+                    </div>
+                </div>
+            </div>
+            """
+        
+        html += """
+        </body>
+        </html>
+        """
+        
+        return html
+        
+    except Exception as e:
+        return f"<h1>Error: {str(e)}</h1>", 500
 
 # =============================================================================
 # ENDPOINTS FLASK PARA SINCRONIZACIÓN
@@ -1537,6 +2013,45 @@ def recargar_rutas_manual():
     except Exception as e:
         return jsonify({"status": "error", "error": str(e)}), 500
 
+# 🆕 ENDPOINT PARA VER UBICACIONES RECIENTES
+@app.route('/api/ubicaciones_recientes')
+def obtener_ubicaciones_recientes():
+    """Obtener ubicaciones recientes de todos los usuarios"""
+    try:
+        cursor.execute('''
+            SELECT user_name, ubicacion, timestamp, tipo
+            FROM incidentes 
+            WHERE tipo = 'ubicacion'
+            ORDER BY timestamp DESC
+            LIMIT 20
+        ''')
+        
+        ubicaciones = cursor.fetchall()
+        
+        resultado = {
+            "status": "success",
+            "total_ubicaciones": len(ubicaciones),
+            "ubicaciones": []
+        }
+        
+        for ubicacion in ubicaciones:
+            user_name, coords, timestamp, tipo = ubicacion
+            lat, lng = coords.split(',') if coords else (0, 0)
+            
+            ubicacion_info = {
+                "usuario": user_name,
+                "latitud": float(lat),
+                "longitud": float(lng),
+                "timestamp": timestamp,
+                "mapa_url": f"https://www.google.com/maps?q={lat},{lng}"
+            }
+            resultado["ubicaciones"].append(ubicacion_info)
+        
+        return jsonify(resultado)
+        
+    except Exception as e:
+        return jsonify({"status": "error", "error": str(e)}), 500
+
 # Y LUEGO SIGUE EL WEBHOOK NORMAL
 @app.route('/webhook', methods=['POST', 'GET'])
 def webhook():
@@ -1622,6 +2137,8 @@ def ver_todas_las_fotos():
 
 print("\n🎯 SISTEMA AUTOMÁTICO DE RUTAS PJCDMX - 100% OPERATIVO")
 print("📱 Comandos: /solicitar_ruta, /miruta, /entregar")
+print("📍 Sistema de ubicación: ACTIVADO")
+print("📸 Fotos reales: ACTIVADO")
 print("🔄 Sistema de avances pendientes: ACTIVADO")
 
 inicializar_sistema_completo()
