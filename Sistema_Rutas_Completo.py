@@ -1,3 +1,4 @@
+# sistema_rutas_minimo_flexible.py
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, scrolledtext
 import pandas as pd
@@ -300,7 +301,7 @@ class GestorTelegram:
             return False
 
 # =============================================================================
-# CLASE PRINCIPAL - MOTOR DE RUTAS CON MÍNIMO 4 EDIFICIOS
+# CLASE PRINCIPAL - MOTOR DE RUTAS CON MÍNIMO FLEXIBLE
 # =============================================================================
 class CoreRouteGenerator:
     def __init__(self, df, api_key, origen_coords, origen_name, max_stops_per_route):
@@ -830,87 +831,38 @@ class CoreRouteGenerator:
         
         df_clean['Zona'] = df_clean['Alcaldia'].apply(asignar_zona)
         
-        # 🆕 ESTRATEGIA MEJORADA: MÍNIMO 4 EDIFICIOS POR RUTA
+        # 🆕 ESTRATEGIA FLEXIBLE: MÍNIMO 2 EDIFICIOS, MÁXIMO según configuración
         subgrupos = {}
-        MINIMO_EDIFICIOS = 4  # 🎯 MÍNIMO 4 EDIFICIOS POR RUTA
+        MINIMO_EDIFICIOS = 2  # 🎯 MÍNIMO 2 EDIFICIOS (no 4)
         
         for zona in df_clean['Zona'].unique():
             registros_zona = df_clean[df_clean['Zona'] == zona]
             self._log(f"🔍 Analizando zona {zona}: {len(registros_zona)} registros")
             
-            # Si la zona tiene muy pocos registros, unir con OTRAS
-            if len(registros_zona) < MINIMO_EDIFICIOS and zona != 'OTRAS':
-                self._log(f"⚠️ Zona {zona} tiene solo {len(registros_zona)} registros - uniendo con OTRAS")
-                registros_otras = df_clean[df_clean['Zona'] == 'OTRAS']
-                if len(registros_otras) > 0:
-                    # Combinar con algunos registros de OTRAS
-                    indices_combinados = list(registros_zona.index) + list(registros_otras.index[:MINIMO_EDIFICIOS - len(registros_zona)])
-                    subgrupos[zona] = [indices_combinados]
-                    self._log(f"   ➕ Combinada con {len(registros_otras[:MINIMO_EDIFICIOS - len(registros_zona)])} registros de OTRAS")
-                    continue
-            
-            # Para zonas con suficientes registros, dividir en rutas de al menos MINIMO_EDIFICIOS
             indices_zona = registros_zona.index.tolist()
             
-            if len(indices_zona) >= MINIMO_EDIFICIOS:
-                # Calcular número óptimo de rutas
-                num_rutas = max(1, len(indices_zona) // MINIMO_EDIFICIOS)
-                tamaño_ruta = max(MINIMO_EDIFICIOS, len(indices_zona) // num_rutas)
-                
-                subgrupos[zona] = []
-                for i in range(0, len(indices_zona), tamaño_ruta):
-                    subgrupo = indices_zona[i:i + tamaño_ruta]
-                    if len(subgrupo) >= MINIMO_EDIFICIOS or i + tamaño_ruta >= len(indices_zona):
-                        subgrupos[zona].append(subgrupo)
-                
-                self._log(f"📍 {zona}: {len(indices_zona)} registros → {len(subgrupos[zona])} rutas (mín {MINIMO_EDIFICIOS} edificios)")
-            else:
-                # Si no alcanza el mínimo, crear una sola ruta
-                subgrupos[zona] = [indices_zona]
-                self._log(f"📍 {zona}: {len(indices_zona)} registros → 1 ruta (menos de {MINIMO_EDIFICIOS} edificios)")
-        
-        # 🆕 REORGANIZAR RUTAS DEMASIADO PEQUEÑAS
-        rutas_finales = {}
-        for zona, grupos in subgrupos.items():
-            rutas_finales[zona] = []
-            
-            for grupo in grupos:
-                if len(grupo) >= MINIMO_EDIFICIOS:
-                    rutas_finales[zona].append(grupo)
-                else:
-                    # Buscar otra ruta pequeña para combinar
-                    combinado = False
-                    for otra_zona in rutas_finales:
-                        if otra_zona != zona and rutas_finales[otra_zona]:
-                            ultima_ruta = rutas_finales[otra_zona][-1]
-                            if len(ultima_ruta) + len(grupo) <= self.max_stops_per_route * 2:  # Límite razonable
-                                rutas_finales[otra_zona][-1].extend(grupo)
-                                self._log(f"   🔄 Combinando {zona} ({len(grupo)} reg) con {otra_zona}")
-                                combinado = True
-                                break
-                    
-                    if not combinado:
-                        rutas_finales[zona].append(grupo)
-                        self._log(f"   ⚠️ {zona}: Ruta con solo {len(grupo)} registros")
+            if len(indices_zona) > 0:
+                # 🎯 DIVISIÓN FLEXIBLE - usar el máximo configurado, mínimo 2
+                tamaño_ruta = self.max_stops_per_route
+                subgrupos[zona] = [indices_zona[i:i + tamaño_ruta] for i in range(0, len(indices_zona), tamaño_ruta)]
+                self._log(f"📍 {zona}: {len(indices_zona)} registros → {len(subgrupos[zona])} rutas (tamaño: {tamaño_ruta})")
         
         self._log("Generating Optimized Routes...")
         self.results = []
         ruta_id = 1
         
-        for zona, grupos in rutas_finales.items():
+        for zona, grupos in subgrupos.items():
             for i, grupo in enumerate(grupos):
                 self._log(f"🛣️ Procesando Ruta {ruta_id}: {zona} ({len(grupo)} registros)")
                 try:
                     result = self._crear_ruta_archivos(zona, grupo, ruta_id)
                     if result:
                         self.results.append(result)
-                        # 🆕 VERIFICAR número de edificios
-                        if result['paradas'] < 2:
-                            self._log(f"⚠️ ADVERTENCIA: Ruta {ruta_id} tiene solo {result['paradas']} edificio(s)")
-                        elif result['paradas'] >= MINIMO_EDIFICIOS:
-                            self._log(f"✅ Ruta {ruta_id} óptima: {result['paradas']} edificios")
+                        # 🆕 VERIFICACIÓN MÁS FLEXIBLE
+                        if result['paradas'] < MINIMO_EDIFICIOS:
+                            self._log(f"⚠️ Ruta {ruta_id} tiene solo {result['paradas']} edificio(s) - MÍNIMO RECOMENDADO: {MINIMO_EDIFICIOS}")
                         else:
-                            self._log(f"📋 Ruta {ruta_id} aceptable: {result['paradas']} edificios")
+                            self._log(f"✅ Ruta {ruta_id} tiene {result['paradas']} edificios")
                 except Exception as e:
                     self._log(f"❌ Error en ruta {ruta_id}: {str(e)}")
                 ruta_id += 1
@@ -946,22 +898,22 @@ class CoreRouteGenerator:
         self._log("CORE ROUTE GENERATION COMPLETED")
         self._log(f"FINAL SUMMARY: {total_routes_gen} routes, {total_edificios} edificios, {total_personas} personas")
         
-        # 🆕 RESUMEN DE CALIDAD DE RUTAS
-        rutas_optimas = sum(1 for r in self.results if r['paradas'] >= MINIMO_EDIFICIOS)
-        rutas_aceptables = sum(1 for r in self.results if 2 <= r['paradas'] < MINIMO_EDIFICIOS)
-        rutas_problematicas = sum(1 for r in self.results if r['paradas'] < 2)
+        # 🆕 RESUMEN FLEXIBLE
+        rutas_optimas = sum(1 for r in self.results if r['paradas'] >= 4)
+        rutas_aceptables = sum(1 for r in self.results if 2 <= r['paradas'] < 4)
+        rutas_minimas = sum(1 for r in self.results if r['paradas'] < 2)
         
-        self._log(f"📊 CALIDAD RUTAS: {rutas_optimas} óptimas, {rutas_aceptables} aceptables, {rutas_problematicas} problemáticas")
+        self._log(f"📊 DISTRIBUCIÓN RUTAS: {rutas_optimas} óptimas (4+), {rutas_aceptables} aceptables (2-3), {rutas_minimas} mínimas (1)")
         
         return self.results
 
 # =============================================================================
-# CLASE INTERFAZ GRÁFICA (SistemaRutasGUI) - VERSIÓN FINAL
+# CLASE INTERFAZ GRÁFICA (SistemaRutasGUI) - VERSIÓN CORREGIDA
 # =============================================================================
 class SistemaRutasGUI:
     def __init__(self, root):
         self.root = root
-        self.root.title("Sistema Rutas PRO - MÍNIMO 4 EDIFICIOS POR RUTA")
+        self.root.title("Sistema Rutas PRO - DISTRIBUCIÓN FLEXIBLE")
         self.root.geometry("1100x800")
         self.root.configure(bg='#f0f0f0')
         
@@ -983,16 +935,15 @@ class SistemaRutasGUI:
         
         self.root.after(1000, self.cargar_excel_desde_github)
 
-
     def setup_ui(self):
         main_frame = ttk.Frame(self.root, padding="10")
         main_frame.pack(fill=tk.BOTH, expand=True)
         
         header_frame = ttk.Frame(main_frame)
         header_frame.pack(fill=tk.X, pady=(0, 20))
-        ttk.Label(header_frame, text="SISTEMA RUTAS PRO - AGRUPAMIENTO POR EDIFICIO", 
+        ttk.Label(header_frame, text="SISTEMA RUTAS PRO - DISTRIBUCIÓN FLEXIBLE", 
                  font=('Arial', 14, 'bold'), foreground='#2c3e50').pack()
-        ttk.Label(header_frame, text="Cada edificio/institución es UNA parada en la ruta, sin importar cuántas personas tenga", 
+        ttk.Label(header_frame, text="Mínimo 2 edificios por ruta - Distribución natural según datos disponibles", 
                  font=('Arial', 10), foreground='#7f8c8d').pack()
         
         config_frame = ttk.LabelFrame(main_frame, text="Configuración", padding="15")
@@ -1004,6 +955,7 @@ class SistemaRutasGUI:
         self.file_label = ttk.Label(file_frame, text="No seleccionado", foreground='red')
         self.file_label.pack(side=tk.LEFT, padx=(10, 10))
         ttk.Button(file_frame, text="Examinar", command=self.cargar_excel).pack(side=tk.LEFT)
+        ttk.Button(file_frame, text="📊 LISTA COMPLETA", command=self.mostrar_lista_completa).pack(side=tk.LEFT, padx=(10, 0))
         
         api_frame = ttk.Frame(config_frame)
         api_frame.pack(fill=tk.X, pady=5)
@@ -1034,7 +986,7 @@ class SistemaRutasGUI:
         
         btn_frame = ttk.Frame(control_frame)
         btn_frame.pack(fill=tk.X)
-        self.btn_generar = ttk.Button(btn_frame, text="GENERAR RUTAS (MÍN 4 EDIFICIOS)", command=self.generar_rutas, state='disabled')
+        self.btn_generar = ttk.Button(btn_frame, text="GENERAR RUTAS FLEXIBLES", command=self.generar_rutas, state='disabled')
         self.btn_generar.pack(side=tk.LEFT, padx=(0, 10))
         
         ttk.Button(btn_frame, text="ABRIR CARPETA MAPAS", command=lambda: self.abrir_carpeta('mapas_pro')).pack(side=tk.LEFT, padx=(0, 10))
@@ -1090,6 +1042,115 @@ class SistemaRutasGUI:
         log_frame.pack(fill=tk.BOTH, expand=True)
         self.log_text = scrolledtext.ScrolledText(log_frame, height=20, wrap=tk.WORD)
         self.log_text.pack(fill=tk.BOTH, expand=True)
+
+    def mostrar_lista_completa(self):
+        """🎯 BOTÓN CORREGIDO: Muestra la lista completa de datos cargados"""
+        try:
+            if self.df is None or self.df.empty:
+                messagebox.showinfo("Info", "No hay datos cargados")
+                return
+            
+            lista_window = tk.Toplevel(self.root)
+            lista_window.title("Lista Completa de Datos")
+            lista_window.geometry("900x600")
+            
+            # Frame para controles
+            control_frame = ttk.Frame(lista_window)
+            control_frame.pack(fill=tk.X, padx=10, pady=10)
+            
+            ttk.Label(control_frame, text="Filtrar por zona:").pack(side=tk.LEFT)
+            zonas = ['TODAS'] + list(self.df['Zona'].unique()) if 'Zona' in self.df.columns else ['TODAS']
+            zona_var = tk.StringVar(value='TODAS')
+            zona_combo = ttk.Combobox(control_frame, textvariable=zona_var, values=zonas, state="readonly")
+            zona_combo.pack(side=tk.LEFT, padx=10)
+            
+            ttk.Label(control_frame, text="Buscar:").pack(side=tk.LEFT, padx=(20, 5))
+            buscar_var = tk.StringVar()
+            buscar_entry = ttk.Entry(control_frame, textvariable=buscar_var, width=20)
+            buscar_entry.pack(side=tk.LEFT, padx=5)
+            
+            def actualizar_tabla():
+                df_filtrado = self.df.copy()
+                
+                # Filtrar por zona
+                if zona_var.get() != 'TODAS' and 'Zona' in df_filtrado.columns:
+                    df_filtrado = df_filtrado[df_filtrado['Zona'] == zona_var.get()]
+                
+                # Filtrar por búsqueda
+                if buscar_var.get():
+                    mask = df_filtrado.astype(str).apply(lambda x: x.str.contains(buscar_var.get(), case=False, na=False)).any(axis=1)
+                    df_filtrado = df_filtrado[mask]
+                
+                # Actualizar treeview
+                for item in tree.get_children():
+                    tree.delete(item)
+                
+                for _, row in df_filtrado.iterrows():
+                    valores = [str(row.get(col, '')) for col in tree['columns']]
+                    tree.insert("", tk.END, values=valores)
+                
+                status_label.config(text=f"Mostrando {len(df_filtrado)} de {len(self.df)} registros")
+            
+            ttk.Button(control_frame, text="🔍 Aplicar Filtros", command=actualizar_tabla).pack(side=tk.LEFT, padx=10)
+            ttk.Button(control_frame, text="📊 Exportar a Excel", command=lambda: self.exportar_lista_completa()).pack(side=tk.LEFT, padx=10)
+            
+            # Frame para tabla
+            table_frame = ttk.Frame(lista_window)
+            table_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+            
+            # Treeview
+            columns = list(self.df.columns)
+            tree = ttk.Treeview(table_frame, columns=columns, show='headings')
+            
+            # Configurar columnas
+            for col in columns:
+                tree.heading(col, text=col)
+                tree.column(col, width=100)
+            
+            # Scrollbars
+            v_scroll = ttk.Scrollbar(table_frame, orient=tk.VERTICAL, command=tree.yview)
+            h_scroll = ttk.Scrollbar(table_frame, orient=tk.HORIZONTAL, command=tree.xview)
+            tree.configure(yscrollcommand=v_scroll.set, xscrollcommand=h_scroll.set)
+            
+            tree.grid(row=0, column=0, sticky='nsew')
+            v_scroll.grid(row=0, column=1, sticky='ns')
+            h_scroll.grid(row=1, column=0, sticky='ew')
+            
+            table_frame.grid_rowconfigure(0, weight=1)
+            table_frame.grid_columnconfigure(0, weight=1)
+            
+            # Status
+            status_label = ttk.Label(lista_window, text=f"Cargando {len(self.df)} registros...")
+            status_label.pack(pady=5)
+            
+            # Cargar datos iniciales
+            actualizar_tabla()
+            
+        except Exception as e:
+            self.log(f"❌ Error mostrando lista completa: {str(e)}")
+            messagebox.showerror("Error", f"No se pudo mostrar la lista:\n{str(e)}")
+
+    def exportar_lista_completa(self):
+        """Exporta la lista completa a Excel"""
+        try:
+            if self.df is None or self.df.empty:
+                messagebox.showinfo("Info", "No hay datos para exportar")
+                return
+            
+            archivo = filedialog.asksaveasfilename(
+                title="Guardar lista completa",
+                defaultextension=".xlsx",
+                filetypes=[("Excel files", "*.xlsx")]
+            )
+            
+            if archivo:
+                self.df.to_excel(archivo, index=False)
+                self.log(f"✅ Lista completa exportada: {os.path.basename(archivo)}")
+                messagebox.showinfo("Éxito", f"Lista exportada a:\n{archivo}")
+                
+        except Exception as e:
+            self.log(f"❌ Error exportando lista: {str(e)}")
+            messagebox.showerror("Error", f"No se pudo exportar:\n{str(e)}")
 
     def cargar_excel_desde_github(self):
         """Cargar automáticamente el Excel de GitHub y configurar API"""
