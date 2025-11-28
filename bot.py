@@ -110,6 +110,118 @@ def limpiar_texto_markdown(texto):
         texto = texto.replace(char, f'\\{char}')
     return texto
 
+def reparar_estructura_ruta(ruta, nombre_archivo):
+    """Reparar automáticamente la estructura de una ruta si faltan campos"""
+    try:
+        necesita_guardar = False
+        
+        # 🆕 GARANTIZAR campos básicos de la ruta
+        if 'ruta_id' not in ruta:
+            ruta['ruta_id'] = 1
+            necesita_guardar = True
+            
+        if 'zona' not in ruta:
+            ruta['zona'] = 'GENERAL'
+            necesita_guardar = True
+            
+        if 'estado' not in ruta:
+            ruta['estado'] = 'pendiente'
+            necesita_guardar = True
+            
+        if 'estadisticas' not in ruta:
+            ruta['estadisticas'] = {
+                'distancia_km': 10,
+                'tiempo_min': 60,
+                'paradas_totales': len(ruta.get('paradas', []))
+            }
+            necesita_guardar = True
+            
+        if 'google_maps_url' not in ruta:
+            ruta['google_maps_url'] = 'https://maps.google.com'
+            necesita_guardar = True
+        
+        # 🆕 REPARAR PARADAS - PARTE CRÍTICA
+        if 'paradas' in ruta:
+            for i, parada in enumerate(ruta['paradas']):
+                reparaciones = []
+                
+                # GARANTIZAR campo 'nombre'
+                if 'nombre' not in parada or not parada['nombre'] or parada['nombre'].strip() == "":
+                    parada['nombre'] = f"Persona {parada.get('orden', i+1)}"
+                    reparaciones.append("nombre")
+                    necesita_guardar = True
+                
+                # GARANTIZAR campo 'orden'
+                if 'orden' not in parada:
+                    parada['orden'] = i + 1
+                    reparaciones.append("orden")
+                    necesita_guardar = True
+                
+                # GARANTIZAR campo 'estado'
+                if 'estado' not in parada:
+                    parada['estado'] = 'pendiente'
+                    reparaciones.append("estado")
+                    necesita_guardar = True
+                
+                # GARANTIZAR campo 'dependencia'
+                if 'dependencia' not in parada:
+                    parada['dependencia'] = 'SIN DEPENDENCIA'
+                    reparaciones.append("dependencia")
+                    necesita_guardar = True
+                
+                # GARANTIZAR campo 'direccion'
+                if 'direccion' not in parada:
+                    parada['direccion'] = 'DIRECCIÓN NO DISPONIBLE'
+                    reparaciones.append("direccion")
+                    necesita_guardar = True
+                
+                if reparaciones:
+                    print(f"   🔧 Reparada parada {i+1}: {', '.join(reparaciones)}")
+        
+        # 🆕 GUARDAR SI SE HICIERON REPARACIONES
+        if necesita_guardar:
+            try:
+                with open(f'rutas_telegram/{nombre_archivo}', 'w', encoding='utf-8') as f:
+                    json.dump(ruta, f, indent=2, ensure_ascii=False)
+                print(f"💾 Ruta reparada y guardada: {nombre_archivo}")
+            except Exception as e:
+                print(f"⚠️ No se pudo guardar ruta reparada: {e}")
+        
+        return ruta
+        
+    except Exception as e:
+        print(f"❌ Error reparando ruta {nombre_archivo}: {e}")
+        return ruta  # Devolver original si hay error
+
+def diagnostico_rutas():
+    """Diagnóstico detallado de las rutas cargadas"""
+    print("\n🔍 DIAGNÓSTICO DE RUTAS:")
+    
+    if not RUTAS_DISPONIBLES:
+        print("❌ No hay rutas disponibles")
+        return
+    
+    for i, ruta in enumerate(RUTAS_DISPONIBLES):
+        print(f"\n📋 Ruta {i+1}: ID {ruta.get('ruta_id', '?')} - {ruta.get('zona', 'Sin zona')}")
+        print(f"   📊 Paradas: {len(ruta.get('paradas', []))}")
+        
+        if 'paradas' in ruta and ruta['paradas']:
+            primera_parada = ruta['paradas'][0]
+            campos = ['nombre', 'orden', 'estado', 'dependencia', 'direccion']
+            campos_faltantes = [campo for campo in campos if campo not in primera_parada or not primera_parada[campo]]
+            
+            if campos_faltantes:
+                print(f"   ⚠️ Campos faltantes en primera parada: {', '.join(campos_faltantes)}")
+            else:
+                print(f"   ✅ Estructura correcta")
+                
+            # Mostrar primeros 3 nombres como ejemplo
+            nombres = []
+            for parada in ruta['paradas'][:3]:
+                nombre = parada.get('nombre', 'SIN NOMBRE')
+                nombres.append(nombre[:20])
+            print(f"   👥 Ejemplos: {', '.join(nombres)}")
+
 def descargar_foto_telegram(file_id, tipo_foto="general"):
     """Descarga la foto real desde Telegram y la guarda en carpeta correspondiente"""
     try:
@@ -205,10 +317,13 @@ def cargar_rutas_disponibles():
                     with open(f'rutas_telegram/{archivo}', 'r', encoding='utf-8') as f:
                         ruta = json.load(f)
                     
+                    # 🆕 REPARAR RUTA ANTES DE CARGARLA
+                    ruta_reparada = reparar_estructura_ruta(ruta, archivo)
+                    
                     # 🆕 ELIMINAR FILTRO DE FECHA - ACEPTAR TODAS LAS RUTAS
-                    if ruta.get('estado') == 'pendiente':
-                        RUTAS_DISPONIBLES.append(ruta)
-                        print(f"✅ Ruta cargada: {ruta['ruta_id']} - {ruta['zona']} ({len(ruta['paradas'])} paradas)")
+                    if ruta_reparada.get('estado') == 'pendiente':
+                        RUTAS_DISPONIBLES.append(ruta_reparada)
+                        print(f"✅ Ruta cargada: {ruta_reparada['ruta_id']} - {ruta_reparada['zona']} ({len(ruta_reparada['paradas'])} paradas)")
                         
                 except Exception as e:
                     print(f"❌ Error cargando ruta {archivo}: {e}")
@@ -2191,6 +2306,9 @@ print("📸 Fotos reales: ACTIVADO")
 print("🔄 Sistema de avances pendientes: ACTIVADO")
 
 inicializar_sistema_completo()
+
+# 🆕 AGREGAR ESTA LÍNEA NUEVA:
+diagnostico_rutas()
 
 if __name__ == "__main__":
     print("🤖 BOT PJCDMX INICIADO CORRECTAMENTE")
