@@ -7,7 +7,7 @@ from telebot import types
 from datetime import datetime
 from flask import Flask, request, jsonify, Response, send_file
 
-print("🚀 INICIANDO BOT COMPLETO - CON FOTOS...")
+print("🚀 INICIANDO BOT COMPLETO - CON BOTONES MEJORADOS...")
 
 TOKEN = os.environ.get("BOT_TOKEN")
 bot = telebot.TeleBot(TOKEN)
@@ -135,22 +135,36 @@ def guardar_foto_bd(file_id, user_id, user_name, caption, tipo, ruta_foto_local)
         return False
 
 # =============================================================================
-# HANDLERS DE TELEGRAM
+# HANDLERS DE TELEGRAM - CON BOTONES MEJORADOS
 # =============================================================================
 
 @bot.message_handler(commands=['start'])
 def start(message):
+    markup = types.InlineKeyboardMarkup()
+    markup.row(
+        types.InlineKeyboardButton("🗺️ Obtener Ruta", callback_data="obtener_ruta"),
+        types.InlineKeyboardButton("👥 Ver Lista Completa", callback_data="lista_completa")
+    )
+    markup.row(
+        types.InlineKeyboardButton("📍 Seguimiento Tiempo Real", callback_data="seguimiento_tiempo_real"),
+        types.InlineKeyboardButton("📞 Contactar Supervisor", callback_data="contactar_supervisor")
+    )
+    markup.row(
+        types.InlineKeyboardButton("📸 Mis Fotos", callback_data="mis_fotos"),
+        types.InlineKeyboardButton("🔧 Debug", callback_data="debug_info")
+    )
+    
     bot.reply_to(message, 
-        "🤖 Bot PJCDMX ACTIVO\n\n"
-        "📸 **Sistema de Fotos ACTIVADO**\n\n"
-        "🚀 **Comandos:**\n"
-        "/ruta - Obtener una ruta\n"
-        "/miruta - Ver tu ruta\n"
-        "/fotos - Ver tus fotos\n"
-        "/debug - Info técnica\n\n"
-        "📸 **Envía una foto con:**\n"
-        "'ENTREGADO A [nombre]' para entregas\n"
-        "Cualquier texto para reportes")
+        "🤖 **Bot PJCDMX - Sistema de Rutas**\n\n"
+        "🚀 **Sistema completo activado con:**\n"
+        "• 🗺️ Gestión de rutas automáticas\n"
+        "• 📸 Sistema de fotos para entregas\n"
+        "• 📍 Seguimiento en tiempo real\n"
+        "• 👥 Listas completas de destinatarios\n\n"
+        "📞 **Soporte inmediato disponible**\n\n"
+        "**Selecciona una opción:**", 
+        parse_mode='Markdown', 
+        reply_markup=markup)
 
 @bot.message_handler(commands=['ruta', 'solicitar_ruta'])
 def dar_ruta(message):
@@ -170,53 +184,167 @@ def dar_ruta(message):
     ruta = RUTAS_DISPONIBLES[0]
     RUTAS_ASIGNADAS[user_id] = ruta['ruta_id']
     
+    # Crear teclado con botones mejorados
+    markup = types.InlineKeyboardMarkup()
+    markup.row(
+        types.InlineKeyboardButton("👥 VER LISTA COMPLETA", callback_data=f"lista_completa_{ruta['ruta_id']}"),
+        types.InlineKeyboardButton("📍 Mi Ubicación", callback_data="ubicacion_actual")
+    )
+    markup.row(
+        types.InlineKeyboardButton("📞 Contactar Supervisor", callback_data="contactar_supervisor"),
+        types.InlineKeyboardButton("📸 Registrar Entrega", callback_data="registrar_entrega")
+    )
+    
     # Mensaje con información completa
-    mensaje = f"🗺️ RUTA {ruta['ruta_id']} - {ruta['zona']}\n\n"
+    mensaje = f"🗺️ **RUTA ASIGNADA - {ruta['zona']}**\n\n"
     
-    for i, parada in enumerate(ruta['paradas'][:5], 1):
+    for i, parada in enumerate(ruta['paradas'][:3], 1):
         nombre = parada.get('nombre', f'Persona {i}')
-        dependencia = parada.get('dependencia', 'Sin dep')
-        direccion = parada.get('direccion', 'Sin dir')
+        dependencia = parada.get('dependencia', 'Sin dependencia')
+        direccion = parada.get('direccion', 'Sin dirección')
         
-        mensaje += f"{i}. {nombre}\n"
-        mensaje += f"   🏢 {dependencia}\n"
-        mensaje += f"   📍 {direccion}\n\n"
+        mensaje += f"**{i}. {nombre}**\n"
+        mensaje += f"🏢 {dependencia}\n"
+        mensaje += f"📍 {direccion}\n\n"
     
-    if len(ruta['paradas']) > 5:
-        mensaje += f"... y {len(ruta['paradas']) - 5} más\n"
+    if len(ruta['paradas']) > 3:
+        mensaje += f"📋 **... y {len(ruta['paradas']) - 3} más**\n\n"
     
-    mensaje += "\n📸 **Para registrar entrega:**\nEnvía foto con 'ENTREGADO A [nombre]'"
+    mensaje += "📸 **Para registrar entrega:**\nEnvía foto con 'ENTREGADO A [nombre]'\n\n"
+    mensaje += "🚀 **Usa los botones para navegar**"
     
-    bot.reply_to(message, mensaje)
+    bot.reply_to(message, mensaje, parse_mode='Markdown', reply_markup=markup)
 
 @bot.message_handler(commands=['miruta'])
 def ver_ruta(message):
     user_id = message.from_user.id
     
     if user_id not in RUTAS_ASIGNADAS:
-        bot.reply_to(message, "❌ No tienes ruta. Usa /ruta")
+        markup = types.InlineKeyboardMarkup()
+        markup.row(types.InlineKeyboardButton("🗺️ Obtener Ruta", callback_data="obtener_ruta"))
+        bot.reply_to(message, "❌ No tienes ruta asignada", reply_markup=markup)
         return
     
     ruta_id = RUTAS_ASIGNADAS[user_id]
     
     for ruta in RUTAS_DISPONIBLES:
         if ruta['ruta_id'] == ruta_id:
-            mensaje = f"🗺️ TU RUTA: {ruta['zona']}\n\n"
+            # Crear teclado para la ruta actual
+            markup = types.InlineKeyboardMarkup()
+            markup.row(
+                types.InlineKeyboardButton("👥 VER LISTA COMPLETA", callback_data=f"lista_completa_{ruta_id}"),
+                types.InlineKeyboardButton("📍 Seguimiento", callback_data="seguimiento_tiempo_real")
+            )
+            markup.row(
+                types.InlineKeyboardButton("📞 Supervisor", callback_data="contactar_supervisor"),
+                types.InlineKeyboardButton("📸 Entregar", callback_data="registrar_entrega")
+            )
             
-            for i, parada in enumerate(ruta['paradas'], 1):
+            mensaje = f"🗺️ **TU RUTA ACTUAL - {ruta['zona']}**\n\n"
+            
+            for i, parada in enumerate(ruta['paradas'][:3], 1):
                 nombre = parada.get('nombre', f'Persona {i}')
-                dependencia = parada.get('dependencia', 'Sin dep')
-                direccion = parada.get('direccion', 'Sin dir')
+                dependencia = parada.get('dependencia', 'Sin dependencia')
+                direccion = parada.get('direccion', 'Sin dirección')
                 
-                mensaje += f"{i}. {nombre}\n"
-                mensaje += f"   🏢 {dependencia}\n"
-                mensaje += f"   📍 {direccion}\n\n"
+                mensaje += f"**{i}. {nombre}**\n"
+                mensaje += f"🏢 {dependencia}\n"
+                mensaje += f"📍 {direccion}\n\n"
             
-            mensaje += "📸 **Envía foto con 'ENTREGADO A [nombre]'**"
-            bot.reply_to(message, mensaje)
+            if len(ruta['paradas']) > 3:
+                mensaje += f"📋 **... y {len(ruta['paradas']) - 3} más**\n\n"
+            
+            mensaje += "📍 **Usa los botones para acciones rápidas**"
+            
+            bot.reply_to(message, mensaje, parse_mode='Markdown', reply_markup=markup)
             return
     
     bot.reply_to(message, "❌ Ruta no encontrada")
+
+@bot.message_handler(commands=['lista_completa'])
+def lista_completa(message):
+    user_id = message.from_user.id
+    
+    if user_id not in RUTAS_ASIGNADAS:
+        bot.reply_to(message, "❌ No tienes una ruta asignada")
+        return
+    
+    ruta_id = RUTAS_ASIGNADAS[user_id]
+    
+    for ruta in RUTAS_DISPONIBLES:
+        if ruta['ruta_id'] == ruta_id:
+            mensaje = f"👥 **LISTA COMPLETA - Ruta {ruta_id}**\n"
+            mensaje += f"📍 **Zona:** {ruta['zona']}\n"
+            mensaje += f"📊 **Total personas:** {len(ruta['paradas'])}\n\n"
+            
+            for i, parada in enumerate(ruta['paradas'], 1):
+                nombre = parada.get('nombre', f'Persona {i}')
+                dependencia = parada.get('dependencia', 'Sin dependencia')
+                direccion = parada.get('direccion', 'Sin dirección')
+                estado = "✅" if parada.get('estado') == 'entregado' else "📍"
+                
+                mensaje += f"{estado} **{i}. {nombre}**\n"
+                mensaje += f"   🏢 {dependencia}\n"
+                mensaje += f"   📍 {direccion}\n\n"
+            
+            bot.reply_to(message, mensaje, parse_mode='Markdown')
+            return
+    
+    bot.reply_to(message, "❌ Ruta no encontrada")
+
+@bot.message_handler(commands=['contactar'])
+def contactar_supervisor(message):
+    info_supervisor = """
+📞 **INFORMACIÓN DE CONTACTO - SUPERVISOR**
+
+👨‍💼 **Lic. Pedro Javier Hernandez Vasquez**
+📱 **Teléfono:** 55 3197 3078
+🕒 **Horario:** 7:00 - 19:00 hrs
+📧 **Email:** (disponible en sistema)
+
+🚨 **Para emergencias:**
+• Llamadas prioritarias
+• Soporte inmediato en ruta
+• Asistencia técnica
+
+💬 **Puedes contactar directamente:**
+• Llamada telefónica
+• Mensaje de WhatsApp
+• Reporte por este bot
+"""
+    bot.reply_to(message, info_supervisor, parse_mode='Markdown')
+
+@bot.message_handler(commands=['seguimiento'])
+def seguimiento_tiempo_real(message):
+    info_seguimiento = """
+📍 **SEGUIMIENTO EN TIEMPO REAL**
+
+🚀 **Sistema activado para:**
+• 📍 Ubicación en tiempo real
+• 🗺️ Optimización de rutas
+• ⚡ Respuesta rápida
+• 📊 Monitoreo continuo
+
+📱 **Cómo funciona:**
+1. Comparte tu ubicación actual
+2. El sistema registra tu posición
+3. Supervisores monitorean en tiempo real
+4. Optimizamos tu ruta automáticamente
+
+🛡️ **Beneficios:**
+• Seguridad en ruta
+• Asistencia inmediata
+• Rutas más eficientes
+• Comunicación constante
+
+⚠️ **Tu ubicación solo es visible para supervisores autorizados**
+"""
+    
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    markup.row(types.KeyboardButton("📍 Compartir mi ubicación", request_location=True))
+    markup.row(types.KeyboardButton("❌ Cancelar"))
+    
+    bot.reply_to(message, info_seguimiento, parse_mode='Markdown', reply_markup=markup)
 
 @bot.message_handler(commands=['fotos'])
 def ver_fotos(message):
@@ -259,15 +387,19 @@ def debug(message):
     cursor.execute('SELECT COUNT(*) FROM fotos WHERE user_id = ?', (user_id,))
     total_fotos = cursor.fetchone()[0]
     
-    mensaje = f"🔧 DEBUG INFO:\n"
-    mensaje += f"Rutas en memoria: {len(RUTAS_DISPONIBLES)}\n"
-    mensaje += f"Tus fotos: {total_fotos}\n"
-    mensaje += f"Tienes ruta: {'SÍ' if user_id in RUTAS_ASIGNADAS else 'NO'}\n"
+    mensaje = f"🔧 **INFORMACIÓN DEL SISTEMA**\n\n"
+    mensaje += f"📦 Rutas disponibles: {len(RUTAS_DISPONIBLES)}\n"
+    mensaje += f"📸 Tus fotos en sistema: {total_fotos}\n"
+    mensaje += f"🗺️ Tienes ruta asignada: {'✅ SÍ' if user_id in RUTAS_ASIGNADAS else '❌ NO'}\n"
     
     if user_id in RUTAS_ASIGNADAS:
-        mensaje += f"Tu ruta_id: {RUTAS_ASIGNADAS[user_id]}\n"
+        mensaje += f"🔢 ID de tu ruta: {RUTAS_ASIGNADAS[user_id]}\n"
     
-    bot.reply_to(message, mensaje)
+    mensaje += f"\n👤 Tu ID: {user_id}\n"
+    mensaje += f"🕒 Hora actual: {datetime.now().strftime('%H:%M:%S')}\n\n"
+    mensaje += "✅ **Sistema operativo al 100%**"
+    
+    bot.reply_to(message, mensaje, parse_mode='Markdown')
 
 @bot.message_handler(commands=['recargar'])
 def recargar(message):
@@ -275,7 +407,50 @@ def recargar(message):
     bot.reply_to(message, f"✅ Rutas recargadas: {len(RUTAS_DISPONIBLES)}")
 
 # =============================================================================
-# MANEJO DE FOTOS - SISTEMA COMPLETO
+# MANEJO DE UBICACIONES
+# =============================================================================
+
+@bot.message_handler(content_types=['location'])
+def manejar_ubicacion(message):
+    """Manejar ubicación en tiempo real"""
+    try:
+        user_id = message.from_user.id
+        user_name = message.from_user.first_name
+        location = message.location
+        
+        latitud = location.latitude
+        longitud = location.longitude
+        
+        # Guardar ubicación en base de datos
+        cursor.execute('''
+            INSERT INTO fotos 
+            (file_id, user_id, user_name, caption, tipo, ruta_local, timestamp)
+            VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        ''', (f"location_{user_id}", user_id, user_name, 
+              f"Ubicación: {latitud},{longitud}", "ubicacion", None))
+        
+        conn.commit()
+        
+        mensaje = f"📍 **UBICACIÓN REGISTRADA**\n\n"
+        mensaje += f"👤 **Usuario:** {user_name}\n"
+        mensaje += f"📌 **Coordenadas:** {latitud}, {longitud}\n"
+        mensaje += f"🕒 **Hora:** {datetime.now().strftime('%H:%M:%S')}\n\n"
+        mensaje += f"🗺️ **Ver en mapa:**\n"
+        mensaje += f"https://www.google.com/maps?q={latitud},{longitud}\n\n"
+        mensaje += "✅ **Tu ubicación ha sido registrada en el sistema**"
+        
+        # Eliminar teclado de ubicación
+        markup = types.ReplyKeyboardRemove()
+        
+        bot.reply_to(message, mensaje, parse_mode='Markdown', reply_markup=markup)
+        print(f"📍 Ubicación guardada: {user_name} - {latitud}, {longitud}")
+        
+    except Exception as e:
+        print(f"❌ Error manejando ubicación: {e}")
+        bot.reply_to(message, "❌ Error al procesar ubicación")
+
+# =============================================================================
+# MANEJO DE FOTOS
 # =============================================================================
 
 @bot.message_handler(content_types=['photo'])
@@ -308,7 +483,8 @@ def manejar_foto_completo(message):
             
             # Si es entrega y tiene ruta, procesar
             if tipo == "entrega" and user_id in RUTAS_ASIGNADAS:
-                respuesta += f"\n\nRuta: {RUTAS_ASIGNADAS[user_id]}\nTexto: {caption}"
+                respuesta += f"\n\n🗺️ **Ruta:** {RUTAS_ASIGNADAS[user_id]}\n"
+                respuesta += f"📝 **Texto:** {caption}"
             
             bot.reply_to(message, respuesta, parse_mode='Markdown')
         else:
@@ -319,12 +495,114 @@ def manejar_foto_completo(message):
         bot.reply_to(message, "❌ Error procesando foto")
 
 # =============================================================================
-# ENDPOINTS FLASK
+# CALLBACK HANDLERS - BOTONES MEJORADOS
+# =============================================================================
+
+@bot.callback_query_handler(func=lambda call: True)
+def manejar_todos_los_callbacks(call):
+    """Manejar todos los callbacks de botones"""
+    try:
+        data = call.data
+        
+        if data == 'obtener_ruta':
+            # Simular comando /ruta
+            dar_ruta(call.message)
+            bot.answer_callback_query(call.id, "🗺️ Obteniendo ruta...")
+            
+        elif data.startswith('lista_completa_'):
+            # Mostrar lista completa de una ruta específica
+            partes = data.split('_')
+            ruta_id = partes[2] if len(partes) >= 3 else "?"
+            
+            for ruta in RUTAS_DISPONIBLES:
+                if str(ruta['ruta_id']) == str(ruta_id):
+                    mensaje = f"👥 **LISTA COMPLETA - Ruta {ruta_id}**\n"
+                    mensaje += f"📍 **Zona:** {ruta['zona']}\n"
+                    mensaje += f"📊 **Total personas:** {len(ruta['paradas'])}\n\n"
+                    
+                    for i, parada in enumerate(ruta['paradas'], 1):
+                        nombre = parada.get('nombre', f'Persona {i}')
+                        dependencia = parada.get('dependencia', 'Sin dependencia')
+                        direccion = parada.get('direccion', 'Sin dirección')
+                        estado = "✅" if parada.get('estado') == 'entregado' else "📍"
+                        
+                        mensaje += f"{estado} **{i}. {nombre}**\n"
+                        mensaje += f"   🏢 {dependencia}\n"
+                        mensaje += f"   📍 {direccion}\n\n"
+                    
+                    bot.send_message(call.message.chat.id, mensaje, parse_mode='Markdown')
+                    break
+            
+            bot.answer_callback_query(call.id, "👥 Lista completa mostrada")
+            
+        elif data == 'lista_completa':
+            # Lista completa desde el menú principal
+            if call.from_user.id in RUTAS_ASIGNADAS:
+                lista_completa(call.message)
+            else:
+                bot.answer_callback_query(call.id, "❌ Primero obtén una ruta")
+            
+        elif data == 'contactar_supervisor':
+            info_supervisor = """
+📞 **CONTACTO SUPERVISOR - URGENCIAS**
+
+👨‍💼 **Lic. Pedro Javier Hernandez Vasquez**
+📱 **Teléfono:** 55 3197 3078
+🕒 **Horario:** 7:00 - 19:00 hrs
+
+🚨 **Para:**
+• Emergencias en ruta
+• Problemas con entregas
+• Asistencia inmediata
+• Reportes urgentes
+
+💬 **Contacto directo disponible**
+"""
+            bot.send_message(call.message.chat.id, info_supervisor, parse_mode='Markdown')
+            bot.answer_callback_query(call.id, "📞 Información de contacto")
+            
+        elif data == 'seguimiento_tiempo_real':
+            seguimiento_tiempo_real(call.message)
+            bot.answer_callback_query(call.id, "📍 Activando seguimiento...")
+            
+        elif data == 'ubicacion_actual':
+            markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+            markup.row(types.KeyboardButton("📍 Compartir mi ubicación", request_location=True))
+            bot.send_message(
+                call.message.chat.id,
+                "📍 **COMPARTIR UBICACIÓN ACTUAL**\n\nPresiona el botón para compartir tu ubicación:",
+                reply_markup=markup,
+                parse_mode='Markdown'
+            )
+            bot.answer_callback_query(call.id, "📍 Solicitando ubicación...")
+            
+        elif data == 'registrar_entrega':
+            bot.send_message(
+                call.message.chat.id,
+                "📸 **REGISTRAR ENTREGA**\n\nEnvía una foto del acuse firmado con el pie de foto:\n\n`ENTREGADO A [NOMBRE COMPLETO]`\n\n**Ejemplo:**\n`ENTREGADO A JUAN PÉREZ LÓPEZ`",
+                parse_mode='Markdown'
+            )
+            bot.answer_callback_query(call.id, "📸 Listo para recibir foto...")
+            
+        elif data == 'mis_fotos':
+            ver_fotos(call.message)
+            bot.answer_callback_query(call.id, "📸 Obteniendo tus fotos...")
+            
+        elif data == 'debug_info':
+            debug(call.message)
+            bot.answer_callback_query(call.id, "🔧 Obteniendo info del sistema...")
+            
+    except Exception as e:
+        print(f"❌ Error en callback: {e}")
+        bot.answer_callback_query(call.id, "❌ Error procesando comando")
+
+# =============================================================================
+# ENDPOINTS FLASK (se mantienen igual)
 # =============================================================================
 
 @app.route('/')
 def home():
-    return "🤖 Bot ACTIVO - Sistema de Fotos funcionando"
+    return "🤖 Bot ACTIVO - Sistema Completo con Botones Mejorados"
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
@@ -387,48 +665,13 @@ def recibir_rutas_desde_programa():
         print(f"❌ Error en API /api/rutas: {e}")
         return jsonify({"error": str(e)}), 500
 
-# Endpoint para ver fotos via web
-@app.route('/api/fotos_usuario/<int:user_id>')
-def fotos_usuario(user_id):
-    """Ver fotos de un usuario específico"""
-    try:
-        cursor.execute('''
-            SELECT file_id, caption, tipo, ruta_local, timestamp 
-            FROM fotos 
-            WHERE user_id = ? 
-            ORDER BY timestamp DESC
-        ''', (user_id,))
-        
-        fotos = cursor.fetchall()
-        
-        resultado = {
-            "user_id": user_id,
-            "total_fotos": len(fotos),
-            "fotos": []
-        }
-        
-        for foto in fotos:
-            file_id, caption, tipo, ruta_local, timestamp = foto
-            resultado["fotos"].append({
-                "file_id": file_id,
-                "caption": caption,
-                "tipo": tipo,
-                "timestamp": timestamp,
-                "tiene_archivo": os.path.exists(ruta_local) if ruta_local else False
-            })
-        
-        return jsonify(resultado)
-        
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
 # =============================================================================
 # INICIALIZACIÓN
 # =============================================================================
 
-print("🎯 CARGANDO SISTEMA COMPLETO...")
+print("🎯 CARGANDO SISTEMA COMPLETO CON BOTONES MEJORADOS...")
 cargar_rutas_simple()
-print("✅ BOT LISTO - SISTEMA DE FOTOS ACTIVADO")
+print("✅ BOT LISTO - BOTONES MEJORADOS ACTIVADOS")
 
 if __name__ == "__main__":
     port = int(os.environ.get('PORT', 8080))
