@@ -665,6 +665,70 @@ def recibir_rutas_desde_programa():
         print(f"❌ Error en API /api/rutas: {e}")
         return jsonify({"error": str(e)}), 500
 
+# Agrega estos endpoints después de los otros endpoints Flask:
+
+@app.route('/api/avances_pendientes', methods=['GET'])
+def obtener_avances_pendientes():
+    """Endpoint para que el programa obtenga avances de entregas"""
+    try:
+        # Por ahora devolvemos un array vacío ya que el sistema está empezando
+        avances = []
+        
+        return jsonify({
+            "status": "success",
+            "avances": avances,
+            "total": 0,
+            "timestamp": datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        return jsonify({"status": "error", "error": str(e)}), 500
+
+@app.route('/api/avances/<avance_id>/procesado', methods=['POST'])
+def marcar_avance_procesado(avance_id):
+    """Marcar un avance como procesado"""
+    try:
+        print(f"✅ Avance procesado: {avance_id}")
+        return jsonify({"status": "success", "message": "Avance marcado como procesado"})
+        
+    except Exception as e:
+        return jsonify({"status": "error", "error": str(e)}), 500
+
+@app.route('/api/diagnostico_rutas', methods=['GET'])
+def diagnostico_rutas():
+    """Diagnóstico completo de rutas"""
+    try:
+        archivos_info = []
+        if os.path.exists('rutas_telegram'):
+            for archivo in os.listdir('rutas_telegram'):
+                if archivo.endswith('.json'):
+                    try:
+                        with open(f'rutas_telegram/{archivo}', 'r', encoding='utf-8') as f:
+                            ruta = json.load(f)
+                        
+                        primera_parada = ruta['paradas'][0] if ruta.get('paradas') else {}
+                        archivos_info.append({
+                            'archivo': archivo,
+                            'ruta_id': ruta.get('ruta_id'),
+                            'zona': ruta.get('zona'),
+                            'paradas': len(ruta.get('paradas', [])),
+                            'primera_persona_nombre': primera_parada.get('nombre'),
+                            'primera_persona_dependencia': primera_parada.get('dependencia'),
+                            'estado': ruta.get('estado')
+                        })
+                    except Exception as e:
+                        archivos_info.append({'archivo': archivo, 'error': str(e)})
+        
+        return jsonify({
+            "status": "success",
+            "archivos_en_sistema": archivos_info,
+            "rutas_en_memoria": len(RUTAS_DISPONIBLES),
+            "rutas_cargadas": [f"Ruta {r['ruta_id']} - {r['zona']}" for r in RUTAS_DISPONIBLES]
+        })
+        
+    except Exception as e:
+        return jsonify({"status": "error", "error": str(e)}), 500
+
 # =============================================================================
 # INICIALIZACIÓN
 # =============================================================================
