@@ -222,6 +222,110 @@ def diagnostico_rutas():
                 nombres.append(nombre[:20])
             print(f"   👥 Ejemplos: {', '.join(nombres)}")
 
+def crear_rutas_de_prueba_si_necesario():
+    """Crear rutas de prueba automáticamente si no hay rutas disponibles"""
+    try:
+        if len(RUTAS_DISPONIBLES) > 0:
+            print(f"✅ Ya hay {len(RUTAS_DISPONIBLES)} rutas disponibles")
+            return True
+            
+        print("🔄 No hay rutas disponibles. Creando rutas de prueba...")
+        
+        # RUTA DE PRUEBA 1
+        ruta1 = {
+            "ruta_id": 1,
+            "zona": "CENTRO HISTÓRICO",
+            "estado": "pendiente",
+            "timestamp_creacion": datetime.now().isoformat(),
+            "google_maps_url": "https://goo.gl/maps/example1",
+            "estadisticas": {
+                "distancia_km": 8.5,
+                "tiempo_min": 45,
+                "paradas_totales": 3
+            },
+            "paradas": [
+                {
+                    "orden": 1,
+                    "nombre": "JUAN PÉREZ LÓPEZ",
+                    "dependencia": "OFICINA CENTRAL",
+                    "direccion": "Av. Principal 123, Centro",
+                    "estado": "pendiente"
+                },
+                {
+                    "orden": 2,
+                    "nombre": "MARÍA GARCÍA HERNÁNDEZ", 
+                    "dependencia": "DEPARTAMENTO LEGAL",
+                    "direccion": "Calle Secundaria 456, Centro",
+                    "estado": "pendiente"
+                },
+                {
+                    "orden": 3,
+                    "nombre": "CARLOS RODRÍGUEZ MARTÍNEZ",
+                    "dependencia": "RECURSOS HUMANOS",
+                    "direccion": "Plaza Central 789, Centro",
+                    "estado": "pendiente"
+                }
+            ]
+        }
+        
+        # RUTA DE PRUEBA 2
+        ruta2 = {
+            "ruta_id": 2,
+            "zona": "ZONA NORTE", 
+            "estado": "pendiente",
+            "timestamp_creacion": datetime.now().isoformat(),
+            "google_maps_url": "https://goo.gl/maps/example2",
+            "estadisticas": {
+                "distancia_km": 12.3,
+                "tiempo_min": 60,
+                "paradas_totales": 3
+            },
+            "paradas": [
+                {
+                    "orden": 1,
+                    "nombre": "LUIS MARTÍNEZ DÍAZ",
+                    "dependencia": "SUCURSAL NORTE",
+                    "direccion": "Av. Norte 111, Col. Industrial", 
+                    "estado": "pendiente"
+                },
+                {
+                    "orden": 2,
+                    "nombre": "SOFÍA RAMÍREZ CASTRO",
+                    "dependencia": "ALMACÉN NORTE",
+                    "direccion": "Calle Industria 222, Col. Industrial",
+                    "estado": "pendiente"
+                },
+                {
+                    "orden": 3,
+                    "nombre": "MIGUEL ÁNGEL FLORES",
+                    "dependencia": "LOGÍSTICA NORTE",
+                    "direccion": "Av. Tecnológico 333, Col. Industrial",
+                    "estado": "pendiente"
+                }
+            ]
+        }
+        
+        # Guardar rutas
+        with open('rutas_telegram/Ruta_1_CENTRO.json', 'w', encoding='utf-8') as f:
+            json.dump(ruta1, f, indent=2, ensure_ascii=False)
+        
+        with open('rutas_telegram/Ruta_2_NORTE.json', 'w', encoding='utf-8') as f:
+            json.dump(ruta2, f, indent=2, ensure_ascii=False)
+        
+        print("✅ 2 rutas de prueba creadas exitosamente")
+        print("   🗺️ Ruta 1: CENTRO HISTÓRICO (3 personas)")
+        print("   🗺️ Ruta 2: ZONA NORTE (3 personas)")
+        
+        # Recargar rutas disponibles
+        cargar_rutas_disponibles()
+        
+        return True
+        
+    except Exception as e:
+        print(f"❌ Error creando rutas de prueba: {e}")
+        traceback.print_exc()
+        return False
+
 def descargar_foto_telegram(file_id, tipo_foto="general"):
     """Descarga la foto real desde Telegram y la guarda en carpeta correspondiente"""
     try:
@@ -601,40 +705,46 @@ def set_webhook():
 # 🚨 FUNCIONES CRÍTICAS NUEVAS PARA MANEJO DE FOTOS (AGREGAR SOLO ESTAS)
 # =============================================================================
 
-def extraer_nombre_entrega(texto):
-    """Extraer nombre de persona del texto de entrega"""
+def extraer_nombre_entrega_mejorado(texto):
+    """🆕 MEJORADO: Extraer nombre de persona con mejor lógica"""
     if not texto:
         return "Persona no identificada"
     
     texto = texto.upper().strip()
     
-    # Buscar patrones
+    # Patrones más específicos
     patrones = [
-        "ENTREGADO A ",
-        "ENTREGADA A ", 
-        "PARA ",
-        "A ",
-        "PARA ENTREGAR A "
+        r"ENTREGADO A\s+([A-ZÁÉÍÓÚÑ\s]+)",
+        r"ENTREGADA A\s+([A-ZÁÉÍÓÚÑ\s]+)", 
+        r"PARA\s+([A-ZÁÉÍÓÚÑ\s]+)",
+        r"A\s+([A-ZÁÉÍÓÚÑ\s]+)",
+        r"ACUSE DE\s+([A-ZÁÉÍÓÚÑ\s]+)"
     ]
     
     for patron in patrones:
-        if patron in texto:
-            nombre = texto.split(patron, 1)[1].strip()
-            # Limpiar nombre
-            nombre = re.sub(r'[^\w\s]', ' ', nombre)
-            nombre = ' '.join(nombre.split()[:3])  # Primeras 3 palabras
+        match = re.search(patron, texto)
+        if match:
+            nombre = match.group(1).strip()
+            # Limpiar y formatear
+            nombre = re.sub(r'[^\w\sÁÉÍÓÚÑáéíóúñ]', ' ', nombre)
+            nombre = ' '.join(nombre.split()[:4])  # Primeras 4 palabras
             return nombre.title()
     
-    # Si no encuentra patrón
-    texto_sin_entregado = texto.replace("ENTREGADO", "").replace("ENTREGADA", "").strip()
-    palabras = texto_sin_entregado.split()[:3]
-    return ' '.join(palabras).title() if palabras else "Persona no identificada"
+    # Fallback: buscar palabras que parecen nombres
+    palabras = texto.split()
+    posibles_nombres = []
+    for palabra in palabras:
+        if (len(palabra) > 2 and 
+            palabra not in ['ENTREGADO', 'ENTREGADA', 'PARA', 'A', 'ACUSE', 'DE']):
+            posibles_nombres.append(palabra)
+    
+    return ' '.join(posibles_nombres[:3]).title() if posibles_nombres else "Persona no identificada"
 
 def procesar_entrega_con_foto(user_id, user_name, file_id, caption, ruta_foto_guardada):
     """Procesar una entrega con foto - VERSIÓN SEGURA SIN MARKDOWN"""
     try:
-        # Extraer nombre de persona
-        persona_entregada = extraer_nombre_entrega(caption)
+        # 🆕 USAR LA NUEVA FUNCIÓN MEJORADA
+        persona_entregada = extraer_nombre_entrega_mejorado(caption)
         
         if user_id not in RUTAS_ASIGNADAS:
             # 🆕 MENSAJE SIMPLE SIN MARKDOWN
@@ -721,6 +831,9 @@ def procesar_entrega_con_foto(user_id, user_name, file_id, caption, ruta_foto_gu
                     }
                     
                     registrar_avance_pendiente(avance)
+                    
+                    # 🆕 ACTUALIZAR EXCEL AUTOMÁTICAMENTE
+                    actualizar_excel_automatico(ruta_id, avance)
                     print(f"📝 Avance pendiente creado para Ruta {ruta_id}")
                         
                 else:
@@ -759,10 +872,10 @@ def procesar_foto_reporte(user_id, user_name, file_id, caption, ruta_foto_guarda
     except Exception as e:
         print(f"❌ Error procesando reporte: {e}")
 
-def actualizar_excel_desde_entrega(ruta_id, persona_entregada, ruta_foto, repartidor, timestamp):
-    """Actualizar Excel automáticamente cuando se registra una entrega"""
+def actualizar_excel_automatico(ruta_id, datos_entrega):
+    """🆕 MEJORADO: Actualizar Excel automáticamente cuando se registra entrega"""
     try:
-        print(f"🔄 Actualizando Excel para Ruta {ruta_id}: {persona_entregada}")
+        print(f"🔄 Actualizando Excel para Ruta {ruta_id}: {datos_entrega['persona_entregada']}")
         
         # Buscar archivo Excel de la ruta
         archivos_excel = [f for f in os.listdir('rutas_excel') 
@@ -779,53 +892,33 @@ def actualizar_excel_desde_entrega(ruta_id, persona_entregada, ruta_foto, repart
         persona_actualizada = False
         for idx, fila in df.iterrows():
             nombre_excel = str(fila.get('Nombre', '')).strip().upper()
-            persona_buscar = persona_entregada.strip().upper()
+            persona_buscar = datos_entrega['persona_entregada'].strip().upper()
             
-            # Búsqueda flexible
+            # Búsqueda flexible mejorada
             if (persona_buscar in nombre_excel or 
                 nombre_excel in persona_buscar or
                 any(palabra in nombre_excel for palabra in persona_buscar.split())):
                 
-                # Crear link para la foto
-                link_foto = f'=HIPERVINCULO("{ruta_foto}", "📸 VER FOTO")' if ruta_foto else "SIN FOTO"
-                
                 # Actualizar fila
-                df.at[idx, 'Acuse'] = f"✅ ENTREGADO - {timestamp}"
-                df.at[idx, 'Repartidor'] = repartidor
-                df.at[idx, 'Foto_Acuse'] = link_foto
-                df.at[idx, 'Timestamp_Entrega'] = timestamp
                 df.at[idx, 'Estado'] = 'ENTREGADO'
+                df.at[idx, 'Fecha_Entrega'] = datos_entrega['timestamp']
+                df.at[idx, 'Repartidor'] = datos_entrega['repartidor']
+                df.at[idx, 'Foto_Acuse'] = datos_entrega.get('foto_local', '')
                 
                 persona_actualizada = True
-                print(f"✅ Excel actualizado: {persona_entregada} → {fila.get('Nombre')}")
+                print(f"✅ Excel actualizado: {datos_entrega['persona_entregada']}")
                 break
         
         if persona_actualizada:
-            # Guardar Excel
             df.to_excel(excel_file, index=False)
             print(f"💾 Excel guardado: {excel_file}")
             return True
         else:
-            print(f"⚠️ Persona no encontrada en Excel: {persona_entregada}")
-            # Agregar nueva fila
-            nueva_fila = {
-                'Orden': len(df) + 1,
-                'Nombre': persona_entregada,
-                'Dependencia': 'NO ENCONTRADO EN LISTA ORIGINAL',
-                'Dirección': 'REGISTRO AUTOMÁTICO',
-                'Acuse': f"✅ ENTREGADO - {timestamp}",
-                'Repartidor': repartidor,
-                'Foto_Acuse': f'=HIPERVINCULO("{ruta_foto}", "📸 VER FOTO")' if ruta_foto else "SIN FOTO",
-                'Timestamp_Entrega': timestamp,
-                'Estado': 'ENTREGADO'
-            }
-            df = pd.concat([df, pd.DataFrame([nueva_fila])], ignore_index=True)
-            df.to_excel(excel_file, index=False)
-            print(f"📝 Nueva fila agregada en Excel: {persona_entregada}")
-            return True
+            print(f"⚠️ Persona no encontrada en Excel: {datos_entrega['persona_entregada']}")
+            return False
             
     except Exception as e:
-        print(f"❌ Error actualizando Excel: {str(e)}")
+        print(f"❌ Error actualizando Excel: {e}")
         return False
 
 # =============================================================================
@@ -1178,13 +1271,13 @@ def ver_mi_ruta(message):
                 parse_mode=None)
 
 # =============================================================================
-# 🚨 HANDLER DE FOTOS CORREGIDO (USAR SOLO ESTE)
+# 🚨 HANDLER DE FOTOS MEJORADO (REEMPLAZAR EL ANTERIOR)
 # =============================================================================
 
 @manejar_errores_telegram   
 @bot.message_handler(content_types=['photo'])
-def manejar_fotos(message):
-    """Manejar fotos de entregas y reportes - VERSIÓN MEJORADA CON DATOS COMPLETOS"""
+def manejar_fotos_mejorado(message):
+    """🆕 MEJORADO: Manejar fotos con mejor detección de tipo"""
     try:
         user_id = message.from_user.id
         user_name = message.from_user.first_name
@@ -1193,32 +1286,34 @@ def manejar_fotos(message):
         
         print(f"📸 Foto recibida de {user_name}: '{caption}'")
         
-        # Detección de tipo
-        caption_lower = caption.lower()
+        # DETECCIÓN MEJORADA DE TIPO
+        caption_lower = caption.lower() if caption else ""
         
-        if any(word in caption_lower for word in ['entregado', 'entregada', '✅', 'recibido', 'acuse']):
-            tipo = 'foto_acuse'
+        es_entrega = False
+        if any(word in caption_lower for word in ['entregado', 'entregada', '✅', 'recibido', 'acuse', 'firmado']):
+            tipo = 'entrega'
             carpeta = 'entregas'
             es_entrega = True
-        elif any(word in caption_lower for word in ['retrasado', 'problema', '⏳', 'estatus']):
-            tipo = 'foto_estatus' 
-            carpeta = 'estatus'
-            es_entrega = False
-        elif any(word in caption_lower for word in ['incidente', 'tráfico', 'trafico', 'accidente', '🚨']):
-            tipo = 'foto_incidente'
+        elif any(word in caption_lower for word in ['incidente', 'problema', 'accidente', '🚨', 'retraso']):
+            tipo = 'incidente'
             carpeta = 'incidentes'
-            es_entrega = False
+        elif any(word in caption_lower for word in ['estatus', 'ubicacion', '📍', 'posicion']):
+            tipo = 'ubicacion'
+            carpeta = 'estatus'
         else:
-            tipo = 'foto_general'
+            tipo = 'general'
             carpeta = 'general'
-            es_entrega = False
-
-        print(f"🎯 CLASIFICACIÓN: '{caption}' → Carpeta: {carpeta}, Entrega: {es_entrega}")
         
-        # DESCARGAR Y GUARDAR FOTO COMPLETA
+        print(f"🎯 CLASIFICACIÓN: '{caption}' → {tipo}")
+
+        # DESCARGAR Y GUARDAR FOTO
         ruta_foto_local = descargar_foto_telegram(file_id, carpeta)
         
-        # 🆕 USAR LA NUEVA FUNCIÓN QUE GUARDA DATOS BINARIOS
+        if not ruta_foto_local:
+            bot.reply_to(message, "❌ Error al guardar la foto. Intenta nuevamente.", parse_mode=None)
+            return
+
+        # GUARDAR EN BASE DE DATOS
         guardar_foto_completa(
             file_id=file_id,
             user_id=user_id,
@@ -1230,32 +1325,17 @@ def manejar_fotos(message):
 
         # PROCESAR SEGÚN TIPO
         if es_entrega:
-            print(f"🎯 Detectada entrega, procesando...")
             procesar_entrega_con_foto(user_id, user_name, file_id, caption, ruta_foto_local)
         else:
-            print(f"🎯 Foto de reporte, procesando...")
             procesar_foto_reporte(user_id, user_name, file_id, caption, ruta_foto_local)
         
-        # 🆕 INFORMAR AL USUARIO CON ENLACE A LA FOTO
-        try:
-            foto_url = f"https://{os.environ.get('RAILWAY_STATIC_URL', 'tu-url-railway')}/api/fotos/{file_id}"
-            mensaje_extra = f"\n\n📎 Enlace permanente: {foto_url}"
-            
-            if es_entrega:
-                bot.send_message(user_id, f"✅ Entrega registrada.{mensaje_extra}", parse_mode=None)
-            else:
-                bot.send_message(user_id, f"✅ Reporte con foto guardado.{mensaje_extra}", parse_mode=None)
-                
-        except Exception as e:
-            print(f"⚠️ No se pudo enviar enlace de foto: {e}")
-        
-        print(f"📸 Procesamiento completado: {user_name} - Tipo: {tipo}")
+        print(f"✅ Foto procesada correctamente: {tipo}")
         
     except Exception as e:
-        print(f"❌ Error con foto: {e}")
+        print(f"❌ Error crítico con foto: {e}")
         traceback.print_exc()
         try:
-            bot.reply_to(message, "❌ Error procesando foto. Intenta nuevamente.", parse_mode=None)
+            bot.reply_to(message, "❌ Error procesando foto. Por favor, intenta nuevamente.", parse_mode=None)
         except:
             pass
 
@@ -2216,6 +2296,33 @@ def obtener_ubicaciones_recientes():
     except Exception as e:
         return jsonify({"status": "error", "error": str(e)}), 500
 
+# 🆕 ENDPOINT PARA LIMPIAR SISTEMA
+@app.route('/admin/limpiar_sistema', methods=['POST'])
+def limpiar_sistema():
+    """🆕 NUEVO: Endpoint para limpiar datos temporales y resetear sistema"""
+    try:
+        # Limpiar avances procesados
+        if os.path.exists('avances_procesados'):
+            for archivo in os.listdir('avances_procesados'):
+                os.remove(f'avances_procesados/{archivo}')
+        
+        # Limpiar avances pendientes en memoria
+        global AVANCES_PENDIENTES
+        AVANCES_PENDIENTES = []
+        
+        # Recargar rutas
+        cargar_rutas_disponibles()
+        
+        return jsonify({
+            "status": "success",
+            "message": "Sistema limpiado exitosamente",
+            "avances_pendientes": len(AVANCES_PENDIENTES),
+            "rutas_disponibles": len(RUTAS_DISPONIBLES)
+        })
+        
+    except Exception as e:
+        return jsonify({"status": "error", "error": str(e)}), 500
+
 # Y LUEGO SIGUE EL WEBHOOK NORMAL
 @app.route('/webhook', methods=['POST', 'GET'])
 def webhook():
@@ -2295,6 +2402,22 @@ def ver_todas_las_fotos():
     except Exception as e:
         return f"<h1>Error: {str(e)}</h1>", 500
 
+@app.route('/admin/crear_rutas_prueba', methods=['GET'])
+def crear_rutas_prueba_endpoint():
+    """Endpoint para crear rutas de prueba manualmente"""
+    try:
+        resultado = crear_rutas_de_prueba_si_necesario()
+        if resultado:
+            return jsonify({
+                "status": "success",
+                "message": "Rutas de prueba creadas",
+                "rutas_disponibles": len(RUTAS_DISPONIBLES)
+            })
+        else:
+            return jsonify({"status": "error", "message": "Error creando rutas"}), 500
+    except Exception as e:
+        return jsonify({"status": "error", "error": str(e)}), 500
+
 # =============================================================================
 # INICIALIZACIÓN Y EJECUCIÓN
 # =============================================================================
@@ -2304,10 +2427,14 @@ print("📱 Comandos: /solicitar_ruta, /miruta, /entregar")
 print("📍 Sistema de ubicación: ACTIVADO")
 print("📸 Fotos reales: ACTIVADO")
 print("🔄 Sistema de avances pendientes: ACTIVADO")
+print("📊 Sincronización con Excel: ACTIVADA")
 
 inicializar_sistema_completo()
 
 # 🆕 AGREGAR ESTA LÍNEA NUEVA:
+crear_rutas_de_prueba_si_necesario()
+
+# 🆕 DIAGNÓSTICO
 diagnostico_rutas()
 
 if __name__ == "__main__":
