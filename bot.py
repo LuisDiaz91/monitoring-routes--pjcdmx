@@ -3,11 +3,12 @@ import telebot
 import sqlite3
 import json
 import requests
+import urllib.parse
 from telebot import types
 from datetime import datetime
 from flask import Flask, request, jsonify, Response, send_file
 
-print("🚀 INICIANDO BOT COMPLETO - CON BOTONES MEJORADOS...")
+print("🚀 INICIANDO BOT COMPLETO - CON GOOGLE MAPS INTEGRADO...")
 
 TOKEN = os.environ.get("BOT_TOKEN")
 bot = telebot.TeleBot(TOKEN)
@@ -70,9 +71,9 @@ def cargar_rutas_simple():
             "ruta_id": 1,
             "zona": "ZONA CENTRO",
             "paradas": [
-                {"nombre": "JUAN PÉREZ", "dependencia": "OFICINA CENTRAL", "direccion": "Av Principal 123"},
-                {"nombre": "MARÍA GARCÍA", "dependencia": "DEPTO LEGAL", "direccion": "Calle 456"},
-                {"nombre": "CARLOS LÓPEZ", "dependencia": "RECURSOS HUMANOS", "direccion": "Plaza 789"}
+                {"nombre": "JUAN PÉREZ", "dependencia": "OFICINA CENTRAL", "direccion": "Av Principal 123, Ciudad de México"},
+                {"nombre": "MARÍA GARCÍA", "dependencia": "DEPTO LEGAL", "direccion": "Calle 456, Ciudad de México"},
+                {"nombre": "CARLOS LÓPEZ", "dependencia": "RECURSOS HUMANOS", "direccion": "Plaza 789, Ciudad de México"}
             ]
         }
         with open('rutas_telegram/ruta_1.json', 'w') as f:
@@ -82,6 +83,49 @@ def cargar_rutas_simple():
     
     print(f"📦 Rutas listas: {len(RUTAS_DISPONIBLES)}")
     return len(RUTAS_DISPONIBLES)
+
+def crear_url_google_maps_ruta_completa(ruta):
+    """
+    Crear URL de Google Maps con todas las paradas de la ruta
+    Formato: https://www.google.com/maps/dir/?api=1&origin=X&destination=Y&waypoints=A|B|C
+    """
+    try:
+        if not ruta.get('paradas') or len(ruta['paradas']) == 0:
+            return None
+        
+        # Tomar la primera parada como origen
+        primera_parada = ruta['paradas'][0]
+        origen = urllib.parse.quote(primera_parada.get('direccion', ''))
+        
+        # Tomar la última parada como destino
+        ultima_parada = ruta['paradas'][-1]
+        destino = urllib.parse.quote(ultima_parada.get('direccion', ''))
+        
+        # Las paradas intermedias como waypoints
+        waypoints = []
+        if len(ruta['paradas']) > 2:
+            for parada in ruta['paradas'][1:-1]:  # Excluir primera y última
+                direccion = parada.get('direccion', '')
+                if direccion:
+                    waypoints.append(urllib.parse.quote(direccion))
+        
+        # Construir la URL
+        base_url = "https://www.google.com/maps/dir/?api=1"
+        url = f"{base_url}&origin={origen}&destination={destino}"
+        
+        if waypoints:
+            waypoints_str = "|".join(waypoints)
+            url += f"&waypoints={waypoints_str}"
+        
+        # Agregar parámetro para optimizar ruta
+        url += "&travelmode=driving"
+        
+        print(f"🗺️ URL Google Maps generada: {url[:100]}...")
+        return url
+        
+    except Exception as e:
+        print(f"❌ Error creando URL de Google Maps: {e}")
+        return None
 
 def descargar_foto_telegram(file_id, tipo_foto="entregas"):
     """Descargar foto desde Telegram y guardarla"""
@@ -135,7 +179,7 @@ def guardar_foto_bd(file_id, user_id, user_name, caption, tipo, ruta_foto_local)
         return False
 
 # =============================================================================
-# HANDLERS DE TELEGRAM - CON BOTONES MEJORADOS
+# HANDLERS DE TELEGRAM - CON BOTÓN DE GOOGLE MAPS COMPLETO
 # =============================================================================
 
 @bot.message_handler(commands=['start'])
@@ -184,8 +228,18 @@ def dar_ruta(message):
     ruta = RUTAS_DISPONIBLES[0]
     RUTAS_ASIGNADAS[user_id] = ruta['ruta_id']
     
-    # Crear teclado con botones mejorados
+    # Generar URL de Google Maps con toda la ruta
+    maps_url = crear_url_google_maps_ruta_completa(ruta)
+    
+    # Crear teclado con botón PRINCIPAL de Google Maps
     markup = types.InlineKeyboardMarkup()
+    
+    if maps_url:
+        # BOTÓN PRINCIPAL: SEGUIR RUTA COMPLETA EN GOOGLE MAPS
+        markup.row(
+            types.InlineKeyboardButton("🗺️ SEGUIR RUTA EN GOOGLE MAPS", url=maps_url)
+        )
+    
     markup.row(
         types.InlineKeyboardButton("👥 VER LISTA COMPLETA", callback_data=f"lista_completa_{ruta['ruta_id']}"),
         types.InlineKeyboardButton("📍 Mi Ubicación", callback_data="ubicacion_actual")
@@ -195,23 +249,31 @@ def dar_ruta(message):
         types.InlineKeyboardButton("📸 Registrar Entrega", callback_data="registrar_entrega")
     )
     
-    # Mensaje con información completa
+    # Mensaje con información completa de la ruta
     mensaje = f"🗺️ **RUTA ASIGNADA - {ruta['zona']}**\n\n"
+    mensaje += f"📊 **Total paradas:** {len(ruta['paradas'])}\n"
+    mensaje += f"📍 **Ruta optimizada para:**\n\n"
     
-    for i, parada in enumerate(ruta['paradas'][:3], 1):
+    for i, parada in enumerate(ruta['paradas'][:5], 1):
         nombre = parada.get('nombre', f'Persona {i}')
         dependencia = parada.get('dependencia', 'Sin dependencia')
         direccion = parada.get('direccion', 'Sin dirección')
         
         mensaje += f"**{i}. {nombre}**\n"
-        mensaje += f"🏢 {dependencia}\n"
-        mensaje += f"📍 {direccion}\n\n"
+        mensaje += f"   🏢 {dependencia}\n"
+        mensaje += f"   📍 {direccion}\n\n"
     
-    if len(ruta['paradas']) > 3:
-        mensaje += f"📋 **... y {len(ruta['paradas']) - 3} más**\n\n"
+    if len(ruta['paradas']) > 5:
+        mensaje += f"📋 **... y {len(ruta['paradas']) - 5} más**\n\n"
     
-    mensaje += "📸 **Para registrar entrega:**\nEnvía foto con 'ENTREGADO A [nombre]'\n\n"
-    mensaje += "🚀 **Usa los botones para navegar**"
+    if maps_url:
+        mensaje += "🚗 **Haz clic en el botón 'SEGUIR RUTA EN GOOGLE MAPS' para:**\n"
+        mensaje += "• Ver todas las paradas en secuencia\n"
+        mensaje += "• Obtener indicaciones paso a paso\n"
+        mensaje += "• Calcular tiempos de viaje\n"
+        mensaje += "• Navegar con voz\n\n"
+    
+    mensaje += "📸 **Para registrar entrega:**\nEnvía foto con 'ENTREGADO A [nombre]'"
     
     bot.reply_to(message, mensaje, parse_mode='Markdown', reply_markup=markup)
 
@@ -229,8 +291,18 @@ def ver_ruta(message):
     
     for ruta in RUTAS_DISPONIBLES:
         if ruta['ruta_id'] == ruta_id:
-            # Crear teclado para la ruta actual
+            # Generar URL de Google Maps con toda la ruta
+            maps_url = crear_url_google_maps_ruta_completa(ruta)
+            
+            # Crear teclado con botón PRINCIPAL de Google Maps
             markup = types.InlineKeyboardMarkup()
+            
+            if maps_url:
+                # BOTÓN PRINCIPAL: SEGUIR RUTA COMPLETA EN GOOGLE MAPS
+                markup.row(
+                    types.InlineKeyboardButton("🗺️ SEGUIR RUTA EN GOOGLE MAPS", url=maps_url)
+                )
+            
             markup.row(
                 types.InlineKeyboardButton("👥 VER LISTA COMPLETA", callback_data=f"lista_completa_{ruta_id}"),
                 types.InlineKeyboardButton("📍 Seguimiento", callback_data="seguimiento_tiempo_real")
@@ -241,20 +313,69 @@ def ver_ruta(message):
             )
             
             mensaje = f"🗺️ **TU RUTA ACTUAL - {ruta['zona']}**\n\n"
+            mensaje += f"📊 **Total paradas:** {len(ruta['paradas'])}\n"
+            mensaje += f"📍 **Próximas paradas:**\n\n"
             
-            for i, parada in enumerate(ruta['paradas'][:3], 1):
+            for i, parada in enumerate(ruta['paradas'][:4], 1):
                 nombre = parada.get('nombre', f'Persona {i}')
                 dependencia = parada.get('dependencia', 'Sin dependencia')
                 direccion = parada.get('direccion', 'Sin dirección')
                 
                 mensaje += f"**{i}. {nombre}**\n"
-                mensaje += f"🏢 {dependencia}\n"
-                mensaje += f"📍 {direccion}\n\n"
+                mensaje += f"   🏢 {dependencia}\n"
+                mensaje += f"   📍 {direccion}\n\n"
             
-            if len(ruta['paradas']) > 3:
-                mensaje += f"📋 **... y {len(ruta['paradas']) - 3} más**\n\n"
+            if len(ruta['paradas']) > 4:
+                mensaje += f"📋 **... y {len(ruta['paradas']) - 4} más**\n\n"
+            
+            if maps_url:
+                mensaje += "🚗 **Haz clic en 'SEGUIR RUTA' para abrir Google Maps con:**\n"
+                mensaje += "• Todas las paradas en orden\n"
+                mensaje += "• Indicaciones de navegación\n"
+                mensaje += "• Tiempos estimados\n\n"
             
             mensaje += "📍 **Usa los botones para acciones rápidas**"
+            
+            bot.reply_to(message, mensaje, parse_mode='Markdown', reply_markup=markup)
+            return
+    
+    bot.reply_to(message, "❌ Ruta no encontrada")
+
+@bot.message_handler(commands=['maps', 'googlemaps', 'navegar'])
+def navegar_ruta(message):
+    """Comando específico para obtener botón de Google Maps"""
+    user_id = message.from_user.id
+    
+    if user_id not in RUTAS_ASIGNADAS:
+        bot.reply_to(message, "❌ Primero obtén una ruta con /ruta")
+        return
+    
+    ruta_id = RUTAS_ASIGNADAS[user_id]
+    
+    for ruta in RUTAS_DISPONIBLES:
+        if ruta['ruta_id'] == ruta_id:
+            # Generar URL de Google Maps
+            maps_url = crear_url_google_maps_ruta_completa(ruta)
+            
+            if not maps_url:
+                bot.reply_to(message, "❌ No se pudo generar la ruta en Google Maps")
+                return
+            
+            # Crear mensaje con botón grande de Google Maps
+            markup = types.InlineKeyboardMarkup()
+            markup.row(
+                types.InlineKeyboardButton("🗺️ ABRIR RUTA COMPLETA EN GOOGLE MAPS", url=maps_url)
+            )
+            
+            mensaje = "🚗 **RUTA DE NAVEGACIÓN**\n\n"
+            mensaje += "Haz clic en el botón para abrir Google Maps con **todas las paradas** en secuencia.\n\n"
+            mensaje += "**Ventajas:**\n"
+            mensaje += "• ✅ Ruta optimizada automáticamente\n"
+            mensaje += "• 🗺️ Indicaciones paso a paso\n"
+            mensaje += "• ⏱️ Tiempos de viaje estimados\n"
+            mensaje += "• 🎧 Navegación por voz\n"
+            mensaje += "• 📱 Funciona en móvil y desktop\n\n"
+            mensaje += "**Total paradas en esta ruta:** " + str(len(ruta['paradas']))
             
             bot.reply_to(message, mensaje, parse_mode='Markdown', reply_markup=markup)
             return
@@ -273,6 +394,9 @@ def lista_completa(message):
     
     for ruta in RUTAS_DISPONIBLES:
         if ruta['ruta_id'] == ruta_id:
+            # Generar URL de Google Maps
+            maps_url = crear_url_google_maps_ruta_completa(ruta)
+            
             mensaje = f"👥 **LISTA COMPLETA - Ruta {ruta_id}**\n"
             mensaje += f"📍 **Zona:** {ruta['zona']}\n"
             mensaje += f"📊 **Total personas:** {len(ruta['paradas'])}\n\n"
@@ -287,7 +411,15 @@ def lista_completa(message):
                 mensaje += f"   🏢 {dependencia}\n"
                 mensaje += f"   📍 {direccion}\n\n"
             
-            bot.reply_to(message, mensaje, parse_mode='Markdown')
+            # Crear teclado con botón de Google Maps si hay URL
+            markup = None
+            if maps_url:
+                markup = types.InlineKeyboardMarkup()
+                markup.row(
+                    types.InlineKeyboardButton("🗺️ SEGUIR ESTA RUTA EN GOOGLE MAPS", url=maps_url)
+                )
+            
+            bot.reply_to(message, mensaje, parse_mode='Markdown', reply_markup=markup)
             return
     
     bot.reply_to(message, "❌ Ruta no encontrada")
@@ -394,6 +526,14 @@ def debug(message):
     
     if user_id in RUTAS_ASIGNADAS:
         mensaje += f"🔢 ID de tu ruta: {RUTAS_ASIGNADAS[user_id]}\n"
+        
+        # Mostrar información de la ruta asignada
+        for ruta in RUTAS_DISPONIBLES:
+            if ruta['ruta_id'] == RUTAS_ASIGNADAS[user_id]:
+                maps_url = crear_url_google_maps_ruta_completa(ruta)
+                if maps_url:
+                    mensaje += f"🔗 URL Google Maps: {maps_url[:50]}...\n"
+                break
     
     mensaje += f"\n👤 Tu ID: {user_id}\n"
     mensaje += f"🕒 Hora actual: {datetime.now().strftime('%H:%M:%S')}\n\n"
@@ -495,7 +635,7 @@ def manejar_foto_completo(message):
         bot.reply_to(message, "❌ Error procesando foto")
 
 # =============================================================================
-# CALLBACK HANDLERS - BOTONES MEJORADOS
+# CALLBACK HANDLERS
 # =============================================================================
 
 @bot.callback_query_handler(func=lambda call: True)
@@ -505,17 +645,18 @@ def manejar_todos_los_callbacks(call):
         data = call.data
         
         if data == 'obtener_ruta':
-            # Simular comando /ruta
             dar_ruta(call.message)
             bot.answer_callback_query(call.id, "🗺️ Obteniendo ruta...")
             
         elif data.startswith('lista_completa_'):
-            # Mostrar lista completa de una ruta específica
             partes = data.split('_')
             ruta_id = partes[2] if len(partes) >= 3 else "?"
             
             for ruta in RUTAS_DISPONIBLES:
                 if str(ruta['ruta_id']) == str(ruta_id):
+                    # Generar URL de Google Maps
+                    maps_url = crear_url_google_maps_ruta_completa(ruta)
+                    
                     mensaje = f"👥 **LISTA COMPLETA - Ruta {ruta_id}**\n"
                     mensaje += f"📍 **Zona:** {ruta['zona']}\n"
                     mensaje += f"📊 **Total personas:** {len(ruta['paradas'])}\n\n"
@@ -530,13 +671,20 @@ def manejar_todos_los_callbacks(call):
                         mensaje += f"   🏢 {dependencia}\n"
                         mensaje += f"   📍 {direccion}\n\n"
                     
-                    bot.send_message(call.message.chat.id, mensaje, parse_mode='Markdown')
+                    # Crear teclado con botón de Google Maps si hay URL
+                    markup = None
+                    if maps_url:
+                        markup = types.InlineKeyboardMarkup()
+                        markup.row(
+                            types.InlineKeyboardButton("🗺️ SEGUIR RUTA EN GOOGLE MAPS", url=maps_url)
+                        )
+                    
+                    bot.send_message(call.message.chat.id, mensaje, parse_mode='Markdown', reply_markup=markup)
                     break
             
             bot.answer_callback_query(call.id, "👥 Lista completa mostrada")
             
         elif data == 'lista_completa':
-            # Lista completa desde el menú principal
             if call.from_user.id in RUTAS_ASIGNADAS:
                 lista_completa(call.message)
             else:
@@ -597,12 +745,12 @@ def manejar_todos_los_callbacks(call):
         bot.answer_callback_query(call.id, "❌ Error procesando comando")
 
 # =============================================================================
-# ENDPOINTS FLASK (se mantienen igual)
+# ENDPOINTS FLASK
 # =============================================================================
 
 @app.route('/')
 def home():
-    return "🤖 Bot ACTIVO - Sistema Completo con Botones Mejorados"
+    return "🤖 Bot ACTIVO - Sistema Completo con Google Maps Integrado"
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
@@ -644,6 +792,12 @@ def recibir_rutas_desde_programa():
         ruta_id = datos_ruta.get('ruta_id', 1)
         zona = datos_ruta.get('zona', 'GENERAL')
         
+        # Verificar que las paradas tengan dirección para Google Maps
+        if datos_ruta.get('paradas'):
+            for i, parada in enumerate(datos_ruta['paradas']):
+                if not parada.get('direccion'):
+                    datos_ruta['paradas'][i]['direccion'] = f"Ciudad de México, Parada {i+1}"
+        
         archivo_ruta = f"rutas_telegram/Ruta_{ruta_id}_{zona}.json"
         
         with open(archivo_ruta, 'w', encoding='utf-8') as f:
@@ -654,26 +808,26 @@ def recibir_rutas_desde_programa():
         
         print(f"✅ Ruta {ruta_id} recibida via API y guardada")
         
+        # Generar URL de Google Maps para esta ruta
+        maps_url = crear_url_google_maps_ruta_completa(datos_ruta)
+        
         return jsonify({
             "status": "success", 
             "ruta_id": ruta_id,
             "archivo": archivo_ruta,
-            "rutas_disponibles": len(RUTAS_DISPONIBLES)
+            "rutas_disponibles": len(RUTAS_DISPONIBLES),
+            "google_maps_url": maps_url if maps_url else "No generada"
         })
         
     except Exception as e:
         print(f"❌ Error en API /api/rutas: {e}")
         return jsonify({"error": str(e)}), 500
 
-# Agrega estos endpoints después de los otros endpoints Flask:
-
 @app.route('/api/avances_pendientes', methods=['GET'])
 def obtener_avances_pendientes():
     """Endpoint para que el programa obtenga avances de entregas"""
     try:
-        # Por ahora devolvemos un array vacío ya que el sistema está empezando
         avances = []
-        
         return jsonify({
             "status": "success",
             "avances": avances,
@@ -714,6 +868,7 @@ def diagnostico_rutas():
                             'paradas': len(ruta.get('paradas', [])),
                             'primera_persona_nombre': primera_parada.get('nombre'),
                             'primera_persona_dependencia': primera_parada.get('dependencia'),
+                            'primera_persona_direccion': primera_parada.get('direccion'),
                             'estado': ruta.get('estado')
                         })
                     except Exception as e:
@@ -733,9 +888,9 @@ def diagnostico_rutas():
 # INICIALIZACIÓN
 # =============================================================================
 
-print("🎯 CARGANDO SISTEMA COMPLETO CON BOTONES MEJORADOS...")
+print("🎯 CARGANDO SISTEMA COMPLETO CON GOOGLE MAPS INTEGRADO...")
 cargar_rutas_simple()
-print("✅ BOT LISTO - BOTONES MEJORADOS ACTIVADOS")
+print("✅ BOT LISTO - GOOGLE MAPS ACTIVADO")
 
 if __name__ == "__main__":
     port = int(os.environ.get('PORT', 8080))
