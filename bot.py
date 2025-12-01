@@ -87,40 +87,64 @@ def cargar_rutas_simple():
 def crear_url_google_maps_ruta_completa(ruta):
     """
     Crear URL de Google Maps con todas las paradas de la ruta
-    Formato: https://www.google.com/maps/dir/?api=1&origin=X&destination=Y&waypoints=A|B|C
+    Versión MEJORADA que funciona con datos de tu generador
     """
     try:
         if not ruta.get('paradas') or len(ruta['paradas']) == 0:
             return None
         
-        # Tomar la primera parada como origen
-        primera_parada = ruta['paradas'][0]
-        origen = urllib.parse.quote(primera_parada.get('direccion', ''))
+        # 🎯 NUEVO: Extraer origen desde los datos de la ruta
+        origen = "TSJCDMX - Niños Héroes 150, Ciudad de México"
         
-        # Tomar la última parada como destino
-        ultima_parada = ruta['paradas'][-1]
-        destino = urllib.parse.quote(ultima_parada.get('direccion', ''))
+        # Si la ruta tiene información de origen, usarla
+        if ruta.get('origen'):
+            origen = ruta['origen']
         
-        # Las paradas intermedias como waypoints
-        waypoints = []
-        if len(ruta['paradas']) > 2:
-            for parada in ruta['paradas'][1:-1]:  # Excluir primera y última
-                direccion = parada.get('direccion', '')
-                if direccion:
-                    waypoints.append(urllib.parse.quote(direccion))
+        # Buscar direcciones en las paradas
+        direcciones = []
         
-        # Construir la URL
+        for parada in ruta['paradas']:
+            # Tu generador tiene 'direccion' en cada parada
+            direccion = parada.get('direccion', '')
+            
+            if not direccion and parada.get('personas'):
+                # Si no hay dirección en la parada, tomar de la primera persona
+                primera_persona = parada['personas'][0] if parada['personas'] else {}
+                direccion = primera_persona.get('direccion', '')
+            
+            if direccion and direccion not in ['N/A', '', 'Sin dirección']:
+                # Agregar Ciudad de México si no está
+                if 'ciudad de méxico' not in direccion.lower() and 'cdmx' not in direccion.lower():
+                    direccion += ", Ciudad de México"
+                
+                direcciones.append(urllib.parse.quote(direccion))
+        
+        if len(direcciones) < 2:
+            return None
+        
+        # Construir URL de Google Maps
         base_url = "https://www.google.com/maps/dir/?api=1"
-        url = f"{base_url}&origin={origen}&destination={destino}"
         
-        if waypoints:
-            waypoints_str = "|".join(waypoints)
+        # Origen: siempre el primer punto
+        origen_codificado = urllib.parse.quote(origen)
+        url = f"{base_url}&origin={origen_codificado}"
+        
+        # Destino: el último punto
+        destino_codificado = direcciones[-1]
+        url += f"&destination={destino_codificado}"
+        
+        # Waypoints: todos los puntos intermedios (excluyendo primero y último)
+        if len(direcciones) > 2:
+            waypoints_str = "|".join(direcciones[1:-1])
             url += f"&waypoints={waypoints_str}"
         
-        # Agregar parámetro para optimizar ruta
+        # Agregar optimización y modo de viaje
         url += "&travelmode=driving"
         
-        print(f"🗺️ URL Google Maps generada: {url[:100]}...")
+        # Agregar opción de optimizar ruta
+        url += "&dir_action=navigate"
+        
+        print(f"🗺️ URL Google Maps generada: {url}")
         return url
         
     except Exception as e:
@@ -231,49 +255,40 @@ def dar_ruta(message):
     # Generar URL de Google Maps con toda la ruta
     maps_url = crear_url_google_maps_ruta_completa(ruta)
     
-    # Crear teclado con botón PRINCIPAL de Google Maps
+    # 🎯 BOTÓN GRANDE Y CLARO DE GOOGLE MAPS
     markup = types.InlineKeyboardMarkup()
     
     if maps_url:
-        # BOTÓN PRINCIPAL: SEGUIR RUTA COMPLETA EN GOOGLE MAPS
+        # 🚗 BOTÓN PRINCIPAL GRANDE
         markup.row(
-            types.InlineKeyboardButton("🗺️ SEGUIR RUTA EN GOOGLE MAPS", url=maps_url)
+            types.InlineKeyboardButton("🚗 ABRIR RUTA COMPLETA EN GOOGLE MAPS", url=maps_url)
         )
     
     markup.row(
-        types.InlineKeyboardButton("👥 VER LISTA COMPLETA", callback_data=f"lista_completa_{ruta['ruta_id']}"),
+        types.InlineKeyboardButton("👥 VER LISTA DE PARADAS", callback_data=f"lista_completa_{ruta['ruta_id']}"),
         types.InlineKeyboardButton("📍 Mi Ubicación", callback_data="ubicacion_actual")
     )
-    markup.row(
-        types.InlineKeyboardButton("📞 Contactar Supervisor", callback_data="contactar_supervisor"),
-        types.InlineKeyboardButton("📸 Registrar Entrega", callback_data="registrar_entrega")
-    )
     
-    # Mensaje con información completa de la ruta
-    mensaje = f"🗺️ **RUTA ASIGNADA - {ruta['zona']}**\n\n"
-    mensaje += f"📊 **Total paradas:** {len(ruta['paradas'])}\n"
-    mensaje += f"📍 **Ruta optimizada para:**\n\n"
-    
-    for i, parada in enumerate(ruta['paradas'][:5], 1):
-        nombre = parada.get('nombre', f'Persona {i}')
-        dependencia = parada.get('dependencia', 'Sin dependencia')
-        direccion = parada.get('direccion', 'Sin dirección')
-        
-        mensaje += f"**{i}. {nombre}**\n"
-        mensaje += f"   🏢 {dependencia}\n"
-        mensaje += f"   📍 {direccion}\n\n"
-    
-    if len(ruta['paradas']) > 5:
-        mensaje += f"📋 **... y {len(ruta['paradas']) - 5} más**\n\n"
+    # Mensaje mejorado
+    mensaje = f"🗺️ **RUTA ASIGNADA - {ruta.get('zona', 'ZONA')}**\n\n"
+    mensaje += f"📊 **Total edificios/paradas:** {len(ruta.get('paradas', []))}\n\n"
     
     if maps_url:
-        mensaje += "🚗 **Haz clic en el botón 'SEGUIR RUTA EN GOOGLE MAPS' para:**\n"
-        mensaje += "• Ver todas las paradas en secuencia\n"
-        mensaje += "• Obtener indicaciones paso a paso\n"
-        mensaje += "• Calcular tiempos de viaje\n"
-        mensaje += "• Navegar con voz\n\n"
+        mensaje += "🚗 **HAZ CLIC EN EL BOTÓN AZUL PARA:**\n"
+        mensaje += "• Abrir Google Maps con TODAS las paradas\n"
+        mensaje += "• Ver ruta optimizada automáticamente\n"
+        mensaje += "• Obtener indicaciones paso a paso\n\n"
     
-    mensaje += "📸 **Para registrar entrega:**\nEnvía foto con 'ENTREGADO A [nombre]'"
+    # Mostrar primeras 3 paradas
+    for i, parada in enumerate(ruta.get('paradas', [])[:3], 1):
+        direccion = parada.get('direccion', 'Sin dirección')
+        cantidad = parada.get('total_personas', 1)
+        
+        mensaje += f"**📍 Parada {i}**\n"
+        mensaje += f"   🏢 {direccion[:50]}...\n"
+        if cantidad > 1:
+            mensaje += f"   👥 {cantidad} personas en este edificio\n"
+        mensaje += "\n"
     
     bot.reply_to(message, mensaje, parse_mode='Markdown', reply_markup=markup)
 
