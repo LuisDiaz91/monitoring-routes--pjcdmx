@@ -100,24 +100,28 @@ def crear_url_google_maps_ruta_completa(ruta):
         if ruta.get('origen'):
             origen = ruta['origen']
         
-        # Buscar direcciones en las paradas
-        direcciones = []
-        
-        for parada in ruta['paradas']:
-            # Tu generador tiene 'direccion' en cada parada
-            direccion = parada.get('direccion', '')
-            
-            if not direccion and parada.get('personas'):
-                # Si no hay dirección en la parada, tomar de la primera persona
-                primera_persona = parada['personas'][0] if parada['personas'] else {}
-                direccion = primera_persona.get('direccion', '')
-            
-            if direccion and direccion not in ['N/A', '', 'Sin dirección']:
-                # Agregar Ciudad de México si no está
-                if 'ciudad de méxico' not in direccion.lower() and 'cdmx' not in direccion.lower():
-                    direccion += ", Ciudad de México"
-                
-                direcciones.append(urllib.parse.quote(direccion))
+# 🎯 BUSCAR DIRECCIONES EN LAS PARADAS - VERSIÓN MEJORADA
+direcciones = []
+
+for parada in ruta['paradas']:
+    # Intentar obtener dirección de diferentes lugares
+    direccion = parada.get('direccion', '')
+    
+    # Si no hay en el nivel superior, buscar en la primera persona
+    if not direccion or direccion in ['N/A', '', 'Sin dirección']:
+        if parada.get('personas') and len(parada['personas']) > 0:
+            primera_persona = parada['personas'][0]
+            direccion = primera_persona.get('direccion', '')
+    
+    # Si aún no hay, usar un valor por defecto
+    if not direccion or direccion in ['N/A', '', 'Sin dirección']:
+        direccion = f"Ciudad de México, Parada {parada.get('orden', '')}"
+    
+    # Agregar Ciudad de México si no está
+    if 'ciudad de méxico' not in direccion.lower() and 'cdmx' not in direccion.lower():
+        direccion += ", Ciudad de México"
+    
+    direcciones.append(urllib.parse.quote(direccion))
         
         if len(direcciones) < 2:
             return None
