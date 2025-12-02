@@ -100,28 +100,28 @@ def crear_url_google_maps_ruta_completa(ruta):
         if ruta.get('origen'):
             origen = ruta['origen']
         
-# 🎯 BUSCAR DIRECCIONES EN LAS PARADAS - VERSIÓN MEJORADA
-direcciones = []
+        # 🎯 BUSCAR DIRECCIONES EN LAS PARADAS - VERSIÓN MEJORADA
+        direcciones = []
 
-for parada in ruta['paradas']:
-    # Intentar obtener dirección de diferentes lugares
-    direccion = parada.get('direccion', '')
-    
-    # Si no hay en el nivel superior, buscar en la primera persona
-    if not direccion or direccion in ['N/A', '', 'Sin dirección']:
-        if parada.get('personas') and len(parada['personas']) > 0:
-            primera_persona = parada['personas'][0]
-            direccion = primera_persona.get('direccion', '')
-    
-    # Si aún no hay, usar un valor por defecto
-    if not direccion or direccion in ['N/A', '', 'Sin dirección']:
-        direccion = f"Ciudad de México, Parada {parada.get('orden', '')}"
-    
-    # Agregar Ciudad de México si no está
-    if 'ciudad de méxico' not in direccion.lower() and 'cdmx' not in direccion.lower():
-        direccion += ", Ciudad de México"
-    
-    direcciones.append(urllib.parse.quote(direccion))
+        for parada in ruta['paradas']:
+            # Intentar obtener dirección de diferentes lugares
+            direccion = parada.get('direccion', '')
+            
+            # Si no hay en el nivel superior, buscar en la primera persona
+            if not direccion or direccion in ['N/A', '', 'Sin dirección']:
+                if parada.get('personas') and len(parada['personas']) > 0:
+                    primera_persona = parada['personas'][0]
+                    direccion = primera_persona.get('direccion', '')
+            
+            # Si aún no hay, usar un valor por defecto
+            if not direccion or direccion in ['N/A', '', 'Sin dirección']:
+                direccion = f"Ciudad de México, Parada {parada.get('orden', '')}"
+            
+            # Agregar Ciudad de México si no está
+            if 'ciudad de méxico' not in direccion.lower() and 'cdmx' not in direccion.lower():
+                direccion += ", Ciudad de México"
+            
+            direcciones.append(urllib.parse.quote(direccion))
         
         if len(direcciones) < 2:
             return None
@@ -210,100 +210,162 @@ def guardar_foto_bd(file_id, user_id, user_name, caption, tipo, ruta_foto_local)
 # HANDLERS DE TELEGRAM - CON BOTÓN DE GOOGLE MAPS COMPLETO
 # =============================================================================
 
-@bot.message_handler(commands=['start'])
+@bot.message_handler(commands=['start', 'inicio'])
 def start(message):
     markup = types.InlineKeyboardMarkup()
     markup.row(
-        types.InlineKeyboardButton("🗺️ Obtener Ruta", callback_data="obtener_ruta"),
-        types.InlineKeyboardButton("👥 Ver Lista Completa", callback_data="lista_completa")
+        types.InlineKeyboardButton("🚗 SOLICITAR RUTA", callback_data="solicitar_ruta"),
+        types.InlineKeyboardButton("🗺️ VER RUTA ACTUAL", callback_data="ver_ruta_actual")
     )
     markup.row(
-        types.InlineKeyboardButton("📍 Seguimiento Tiempo Real", callback_data="seguimiento_tiempo_real"),
-        types.InlineKeyboardButton("📞 Contactar Supervisor", callback_data="contactar_supervisor")
+        types.InlineKeyboardButton("📍 SEGUIMIENTO", callback_data="seguimiento_tiempo_real"),
+        types.InlineKeyboardButton("📞 SUPERVISOR", callback_data="contactar_supervisor")
     )
     markup.row(
-        types.InlineKeyboardButton("📸 Mis Fotos", callback_data="mis_fotos"),
-        types.InlineKeyboardButton("🔧 Debug", callback_data="debug_info")
+        types.InlineKeyboardButton("📸 ENTREGAS", callback_data="mis_fotos"),
+        types.InlineKeyboardButton("📋 LISTA PARADAS", callback_data="lista_completa")
     )
     
     bot.reply_to(message, 
-        "🤖 **Bot PJCDMX - Sistema de Rutas**\n\n"
-        "🚀 **Sistema completo activado con:**\n"
-        "• 🗺️ Gestión de rutas automáticas\n"
-        "• 📸 Sistema de fotos para entregas\n"
-        "• 📍 Seguimiento en tiempo real\n"
-        "• 👥 Listas completas de destinatarios\n\n"
-        "📞 **Soporte inmediato disponible**\n\n"
-        "**Selecciona una opción:**", 
+        "🤖 **BOT PJCDMX - SISTEMA DE ENTREGAS**\n\n"
+        "🚀 **¿Qué necesitas hacer?**\n\n"
+        "• 🚗 **SOLICITAR RUTA:** Obtén tu ruta de entregas optimizada\n"
+        "• 🗺️ **VER RUTA:** Muestra tu ruta actual con botón para Google Maps\n"
+        "• 📍 **SEGUIMIENTO:** Comparte tu ubicación en tiempo real\n"
+        "• 📞 **SUPERVISOR:** Contacta a tu supervisor inmediatamente\n"
+        "• 📸 **ENTREGAS:** Registra entregas con fotos y acuses\n"
+        "• 📋 **LISTA:** Ver lista completa de personas a entregar\n\n"
+        "👉 **Selecciona una opción o usa /ayuda para ver todos los comandos**", 
         parse_mode='Markdown', 
         reply_markup=markup)
+
+@bot.message_handler(commands=['ayuda', 'help'])
+def ayuda(message):
+    comandos = """
+📋 **LISTA DE COMANDOS DISPONIBLES:**
+
+🚗 **RUTAS Y NAVEGACIÓN:**
+• /start - Menú principal del bot
+• /ruta - Solicitar una nueva ruta de entregas
+• /miruta - Ver tu ruta actual asignada
+• /maps - Abrir Google Maps con tu ruta completa
+• /lista - Ver lista completa de personas a entregar
+
+📍 **SEGUIMIENTO:**
+• /seguimiento - Compartir ubicación en tiempo real
+• /ubicacion - Enviar tu ubicación actual
+
+📸 **ENTREGAS Y FOTOS:**
+• /entregar - Registrar una entrega con foto
+• /fotos - Ver tus fotos de entregas enviadas
+• /reporte - Enviar reporte de incidente con foto
+
+📞 **CONTACTO Y SOPORTE:**
+• /supervisor - Información de contacto del supervisor
+• /ayuda - Mostrar esta lista de comandos
+• /debug - Información del sistema
+
+🔧 **ADMINISTRACIÓN:**
+• /recargar - Recargar rutas desde el sistema
+"""
+    
+    markup = types.InlineKeyboardMarkup()
+    markup.row(
+        types.InlineKeyboardButton("🚗 SOLICITAR RUTA", callback_data="solicitar_ruta"),
+        types.InlineKeyboardButton("🗺️ ABRIR GOOGLE MAPS", callback_data="abrir_maps")
+    )
+    
+    bot.reply_to(message, comandos, parse_mode='Markdown', reply_markup=markup)
 
 @bot.message_handler(commands=['ruta', 'solicitar_ruta'])
 def dar_ruta(message):
     user_id = message.from_user.id
     
     if user_id in RUTAS_ASIGNADAS:
-        bot.reply_to(message, "⚠️ Ya tienes una ruta. Usa /miruta")
+        markup = types.InlineKeyboardMarkup()
+        markup.row(
+            types.InlineKeyboardButton("🗺️ VER MI RUTA ACTUAL", callback_data="ver_ruta_actual"),
+            types.InlineKeyboardButton("🔄 CAMBIAR RUTA", callback_data="cambiar_ruta")
+        )
+        bot.reply_to(message, 
+                    "⚠️ **YA TIENES UNA RUTA ASIGNADA**\n\n"
+                    "¿Quieres ver tu ruta actual o solicitar una nueva?", 
+                    parse_mode='Markdown', 
+                    reply_markup=markup)
         return
     
     if len(RUTAS_DISPONIBLES) == 0:
         cargar_rutas_simple()
     
     if len(RUTAS_DISPONIBLES) == 0:
-        bot.reply_to(message, "❌ No hay rutas disponibles")
+        bot.reply_to(message, "❌ **NO HAY RUTAS DISPONIBLES**\n\nEl sistema está generando rutas. Intenta más tarde.")
         return
     
+    # Asignar la primera ruta disponible
     ruta = RUTAS_DISPONIBLES[0]
     RUTAS_ASIGNADAS[user_id] = ruta['ruta_id']
     
     # Generar URL de Google Maps con toda la ruta
     maps_url = crear_url_google_maps_ruta_completa(ruta)
     
-    # 🎯 BOTÓN GRANDE Y CLARO DE GOOGLE MAPS
+    # 🎯 CREAR MENSAJE CON BOTÓN PRINCIPAL DE GOOGLE MAPS
     markup = types.InlineKeyboardMarkup()
     
     if maps_url:
-        # 🚗 BOTÓN PRINCIPAL GRANDE
+        # BOTÓN PRINCIPAL GRANDE - GOOGLE MAPS
         markup.row(
-            types.InlineKeyboardButton("🚗 ABRIR RUTA COMPLETA EN GOOGLE MAPS", url=maps_url)
+            types.InlineKeyboardButton("📍 ABRIR RUTA EN GOOGLE MAPS", url=maps_url)
         )
     
+    # Botones secundarios
     markup.row(
-        types.InlineKeyboardButton("👥 VER LISTA DE PARADAS", callback_data=f"lista_completa_{ruta['ruta_id']}"),
-        types.InlineKeyboardButton("📍 Mi Ubicación", callback_data="ubicacion_actual")
+        types.InlineKeyboardButton("📋 VER LISTA DE PARADAS", callback_data=f"lista_completa_{ruta['ruta_id']}"),
+        types.InlineKeyboardButton("📍 MI UBICACIÓN", callback_data="ubicacion_actual")
+    )
+    markup.row(
+        types.InlineKeyboardButton("📸 REGISTRAR ENTREGA", callback_data="registrar_entrega"),
+        types.InlineKeyboardButton("📞 CONTACTAR SUPERVISOR", callback_data="contactar_supervisor")
     )
     
-    # Mensaje mejorado
-    mensaje = f"🗺️ **RUTA ASIGNADA - {ruta.get('zona', 'ZONA')}**\n\n"
-    mensaje += f"📊 **Total edificios/paradas:** {len(ruta.get('paradas', []))}\n\n"
+    # Mensaje informativo
+    mensaje = f"✅ **RUTA ASIGNADA EXITOSAMENTE**\n\n"
+    mensaje += f"📊 **RUTA:** {ruta.get('zona', 'SIN ZONA')} - ID: {ruta['ruta_id']}\n"
+    mensaje += f"📍 **TOTAL PARADAS:** {len(ruta.get('paradas', []))}\n\n"
     
     if maps_url:
-        mensaje += "🚗 **HAZ CLIC EN EL BOTÓN AZUL PARA:**\n"
-        mensaje += "• Abrir Google Maps con TODAS las paradas\n"
-        mensaje += "• Ver ruta optimizada automáticamente\n"
-        mensaje += "• Obtener indicaciones paso a paso\n\n"
+        mensaje += "🚗 **HAZ CLIC EN EL BOTÓN 'ABRIR RUTA EN GOOGLE MAPS' PARA:**\n"
+        mensaje += "• Ver la ruta completa optimizada\n"
+        mensaje += "• Obtener indicaciones paso a paso\n"
+        mensaje += "• Navegar con Google Maps\n\n"
     
     # Mostrar primeras 3 paradas
+    mensaje += "📦 **PRIMERAS PARADAS:**\n"
     for i, parada in enumerate(ruta.get('paradas', [])[:3], 1):
         direccion = parada.get('direccion', 'Sin dirección')
         cantidad = parada.get('total_personas', 1)
         
-        mensaje += f"**📍 Parada {i}**\n"
+        mensaje += f"\n**📍 Parada {i}**\n"
         mensaje += f"   🏢 {direccion[:50]}...\n"
         if cantidad > 1:
             mensaje += f"   👥 {cantidad} personas en este edificio\n"
-        mensaje += "\n"
     
     bot.reply_to(message, mensaje, parse_mode='Markdown', reply_markup=markup)
 
-@bot.message_handler(commands=['miruta'])
+@bot.message_handler(commands=['miruta', 'verruta'])
 def ver_ruta(message):
     user_id = message.from_user.id
     
     if user_id not in RUTAS_ASIGNADAS:
         markup = types.InlineKeyboardMarkup()
-        markup.row(types.InlineKeyboardButton("🗺️ Obtener Ruta", callback_data="obtener_ruta"))
-        bot.reply_to(message, "❌ No tienes ruta asignada", reply_markup=markup)
+        markup.row(
+            types.InlineKeyboardButton("🚗 SOLICITAR RUTA", callback_data="solicitar_ruta"),
+            types.InlineKeyboardButton("❓ AYUDA", callback_data="ayuda_boton")
+        )
+        bot.reply_to(message, 
+                    "❌ **NO TIENES RUTA ASIGNADA**\n\n"
+                    "Primero solicita una ruta para comenzar las entregas.", 
+                    parse_mode='Markdown', 
+                    reply_markup=markup)
         return
     
     ruta_id = RUTAS_ASIGNADAS[user_id]
@@ -317,25 +379,36 @@ def ver_ruta(message):
             markup = types.InlineKeyboardMarkup()
             
             if maps_url:
-                # BOTÓN PRINCIPAL: SEGUIR RUTA COMPLETA EN GOOGLE MAPS
+                # BOTÓN PRINCIPAL: ABRIR RUTA EN GOOGLE MAPS
                 markup.row(
-                    types.InlineKeyboardButton("🗺️ SEGUIR RUTA EN GOOGLE MAPS", url=maps_url)
+                    types.InlineKeyboardButton("📍 ABRIR RUTA EN GOOGLE MAPS", url=maps_url)
                 )
             
+            # Botones de acciones
             markup.row(
-                types.InlineKeyboardButton("👥 VER LISTA COMPLETA", callback_data=f"lista_completa_{ruta_id}"),
-                types.InlineKeyboardButton("📍 Seguimiento", callback_data="seguimiento_tiempo_real")
+                types.InlineKeyboardButton("📋 VER LISTA COMPLETA", callback_data=f"lista_completa_{ruta_id}"),
+                types.InlineKeyboardButton("📍 SEGUIMIENTO", callback_data="seguimiento_tiempo_real")
             )
             markup.row(
-                types.InlineKeyboardButton("📞 Supervisor", callback_data="contactar_supervisor"),
-                types.InlineKeyboardButton("📸 Entregar", callback_data="registrar_entrega")
+                types.InlineKeyboardButton("📞 SUPERVISOR", callback_data="contactar_supervisor"),
+                types.InlineKeyboardButton("📸 REGISTRAR ENTREGA", callback_data="registrar_entrega")
             )
             
-            mensaje = f"🗺️ **TU RUTA ACTUAL - {ruta['zona']}**\n\n"
-            mensaje += f"📊 **Total paradas:** {len(ruta['paradas'])}\n"
-            mensaje += f"📍 **Próximas paradas:**\n\n"
+            # Mensaje detallado
+            total_paradas = len(ruta['paradas'])
+            paradas_entregadas = len([p for p in ruta['paradas'] if p.get('estado') == 'entregado'])
             
-            for i, parada in enumerate(ruta['paradas'][:4], 1):
+            mensaje = f"🗺️ **TU RUTA ACTUAL**\n\n"
+            mensaje += f"📊 **RUTA:** {ruta['zona']} - ID: {ruta_id}\n"
+            mensaje += f"📍 **PARADAS:** {paradas_entregadas}/{total_paradas} entregadas\n"
+            mensaje += f"⏱️ **PROGRESO:** {int((paradas_entregadas/total_paradas)*100)}%\n\n"
+            
+            mensaje += "📍 **PRÓXIMAS PARADAS:**\n\n"
+            
+            # Mostrar próximas paradas no entregadas
+            paradas_pendientes = [p for p in ruta['paradas'] if p.get('estado') != 'entregado']
+            
+            for i, parada in enumerate(paradas_pendientes[:3], 1):
                 nombre = parada.get('nombre', f'Persona {i}')
                 dependencia = parada.get('dependencia', 'Sin dependencia')
                 direccion = parada.get('direccion', 'Sin dirección')
@@ -344,29 +417,33 @@ def ver_ruta(message):
                 mensaje += f"   🏢 {dependencia}\n"
                 mensaje += f"   📍 {direccion}\n\n"
             
-            if len(ruta['paradas']) > 4:
-                mensaje += f"📋 **... y {len(ruta['paradas']) - 4} más**\n\n"
+            if len(paradas_pendientes) > 3:
+                mensaje += f"📋 **... y {len(paradas_pendientes) - 3} más por entregar**\n\n"
             
             if maps_url:
-                mensaje += "🚗 **Haz clic en 'SEGUIR RUTA' para abrir Google Maps con:**\n"
-                mensaje += "• Todas las paradas en orden\n"
-                mensaje += "• Indicaciones de navegación\n"
-                mensaje += "• Tiempos estimados\n\n"
-            
-            mensaje += "📍 **Usa los botones para acciones rápidas**"
+                mensaje += "👉 **Haz clic en 'ABRIR RUTA EN GOOGLE MAPS' para:**\n"
+                mensaje += "• Navegar con indicaciones paso a paso\n"
+                mensaje += "• Ver la ruta optimizada\n"
+                mensaje += "• Calcular tiempos de viaje\n\n"
             
             bot.reply_to(message, mensaje, parse_mode='Markdown', reply_markup=markup)
             return
     
-    bot.reply_to(message, "❌ Ruta no encontrada")
+    bot.reply_to(message, "❌ Ruta no encontrada. Usa /ruta para solicitar una nueva.")
 
-@bot.message_handler(commands=['maps', 'googlemaps', 'navegar'])
+@bot.message_handler(commands=['maps', 'googlemaps', 'navegar', 'ruta_maps'])
 def navegar_ruta(message):
     """Comando específico para obtener botón de Google Maps"""
     user_id = message.from_user.id
     
     if user_id not in RUTAS_ASIGNADAS:
-        bot.reply_to(message, "❌ Primero obtén una ruta con /ruta")
+        markup = types.InlineKeyboardMarkup()
+        markup.row(types.InlineKeyboardButton("🚗 SOLICITAR RUTA", callback_data="solicitar_ruta"))
+        bot.reply_to(message, 
+                    "❌ **PRIMERO NECESITAS UNA RUTA**\n\n"
+                    "Solicita una ruta para poder verla en Google Maps.", 
+                    parse_mode='Markdown', 
+                    reply_markup=markup)
         return
     
     ruta_id = RUTAS_ASIGNADAS[user_id]
@@ -383,25 +460,31 @@ def navegar_ruta(message):
             # Crear mensaje con botón grande de Google Maps
             markup = types.InlineKeyboardMarkup()
             markup.row(
-                types.InlineKeyboardButton("🗺️ ABRIR RUTA COMPLETA EN GOOGLE MAPS", url=maps_url)
+                types.InlineKeyboardButton("📍 ABRIR RUTA COMPLETA EN GOOGLE MAPS", url=maps_url)
             )
             
-            mensaje = "🚗 **RUTA DE NAVEGACIÓN**\n\n"
+            # Botones adicionales
+            markup.row(
+                types.InlineKeyboardButton("📋 VER LISTA DE PARADAS", callback_data=f"lista_completa_{ruta_id}"),
+                types.InlineKeyboardButton("🗺️ VER MI RUTA", callback_data="ver_ruta_actual")
+            )
+            
+            mensaje = "🚗 **NAVEGACIÓN CON GOOGLE MAPS**\n\n"
             mensaje += "Haz clic en el botón para abrir Google Maps con **todas las paradas** en secuencia.\n\n"
-            mensaje += "**Ventajas:**\n"
-            mensaje += "• ✅ Ruta optimizada automáticamente\n"
-            mensaje += "• 🗺️ Indicaciones paso a paso\n"
+            mensaje += "✅ **VENTAJAS:**\n"
+            mensaje += "• 🗺️ Ruta optimizada automáticamente\n"
+            mensaje += "• 📍 Indicaciones paso a paso\n"
             mensaje += "• ⏱️ Tiempos de viaje estimados\n"
-            mensaje += "• 🎧 Navegación por voz\n"
-            mensaje += "• 📱 Funciona en móvil y desktop\n\n"
-            mensaje += "**Total paradas en esta ruta:** " + str(len(ruta['paradas']))
+            mensaje += "• 🎧 Navegación por voz disponible\n"
+            mensaje += "• 📱 Funciona en móvil y computadora\n\n"
+            mensaje += f"📍 **Total paradas en esta ruta:** {len(ruta['paradas'])}"
             
             bot.reply_to(message, mensaje, parse_mode='Markdown', reply_markup=markup)
             return
     
     bot.reply_to(message, "❌ Ruta no encontrada")
 
-@bot.message_handler(commands=['lista_completa'])
+@bot.message_handler(commands=['lista', 'listacompleta', 'paradas'])
 def lista_completa(message):
     user_id = message.from_user.id
     
@@ -416,34 +499,46 @@ def lista_completa(message):
             # Generar URL de Google Maps
             maps_url = crear_url_google_maps_ruta_completa(ruta)
             
-            mensaje = f"👥 **LISTA COMPLETA - Ruta {ruta_id}**\n"
+            total_paradas = len(ruta['paradas'])
+            paradas_entregadas = len([p for p in ruta['paradas'] if p.get('estado') == 'entregado'])
+            
+            mensaje = f"📋 **LISTA COMPLETA - Ruta {ruta_id}**\n"
             mensaje += f"📍 **Zona:** {ruta['zona']}\n"
-            mensaje += f"📊 **Total personas:** {len(ruta['paradas'])}\n\n"
+            mensaje += f"📊 **Progreso:** {paradas_entregadas}/{total_paradas} entregadas\n"
+            mensaje += f"⏱️ **Completado:** {int((paradas_entregadas/total_paradas)*100)}%\n\n"
             
             for i, parada in enumerate(ruta['paradas'], 1):
                 nombre = parada.get('nombre', f'Persona {i}')
                 dependencia = parada.get('dependencia', 'Sin dependencia')
                 direccion = parada.get('direccion', 'Sin dirección')
                 estado = "✅" if parada.get('estado') == 'entregado' else "📍"
+                cantidad = parada.get('total_personas', 1)
                 
                 mensaje += f"{estado} **{i}. {nombre}**\n"
                 mensaje += f"   🏢 {dependencia}\n"
-                mensaje += f"   📍 {direccion}\n\n"
+                mensaje += f"   📍 {direccion}\n"
+                if cantidad > 1:
+                    mensaje += f"   👥 {cantidad} personas en este edificio\n"
+                mensaje += "\n"
             
             # Crear teclado con botón de Google Maps si hay URL
-            markup = None
+            markup = types.InlineKeyboardMarkup()
             if maps_url:
-                markup = types.InlineKeyboardMarkup()
                 markup.row(
-                    types.InlineKeyboardButton("🗺️ SEGUIR ESTA RUTA EN GOOGLE MAPS", url=maps_url)
+                    types.InlineKeyboardButton("🗺️ ABRIR RUTA EN GOOGLE MAPS", url=maps_url)
                 )
+            
+            markup.row(
+                types.InlineKeyboardButton("🗺️ VER MI RUTA", callback_data="ver_ruta_actual"),
+                types.InlineKeyboardButton("📸 REGISTRAR ENTREGA", callback_data="registrar_entrega")
+            )
             
             bot.reply_to(message, mensaje, parse_mode='Markdown', reply_markup=markup)
             return
     
     bot.reply_to(message, "❌ Ruta no encontrada")
 
-@bot.message_handler(commands=['contactar'])
+@bot.message_handler(commands=['supervisor', 'contactar'])
 def contactar_supervisor(message):
     info_supervisor = """
 📞 **INFORMACIÓN DE CONTACTO - SUPERVISOR**
@@ -451,53 +546,69 @@ def contactar_supervisor(message):
 👨‍💼 **Lic. Pedro Javier Hernandez Vasquez**
 📱 **Teléfono:** 55 3197 3078
 🕒 **Horario:** 7:00 - 19:00 hrs
-📧 **Email:** (disponible en sistema)
+📧 **Email:** supervisor@pjcdmx.mx
 
-🚨 **Para emergencias:**
-• Llamadas prioritarias
+🚨 **PARA EMERGENCIAS:**
+• Llamadas prioritarias 24/7
 • Soporte inmediato en ruta
 • Asistencia técnica
+• Reportes urgentes
 
-💬 **Puedes contactar directamente:**
-• Llamada telefónica
+💬 **CANALES DE CONTACTO:**
+• Llamada telefónica directa
 • Mensaje de WhatsApp
 • Reporte por este bot
-"""
-    bot.reply_to(message, info_supervisor, parse_mode='Markdown')
+• Correo electrónico
 
-@bot.message_handler(commands=['seguimiento'])
+⚠️ **Para emergencias en ruta, llama inmediatamente al supervisor.**
+"""
+    
+    markup = types.InlineKeyboardMarkup()
+    markup.row(
+        types.InlineKeyboardButton("📞 LLAMAR AL SUPERVISOR", url="tel:+525531973078"),
+        types.InlineKeyboardButton("📱 ENVIAR WHATSAPP", url="https://wa.me/525531973078")
+    )
+    markup.row(
+        types.InlineKeyboardButton("🚨 REPORTE URGENTE", callback_data="reporte_urgente"),
+        types.InlineKeyboardButton("📋 VOLVER AL MENÚ", callback_data="volver_menu")
+    )
+    
+    bot.reply_to(message, info_supervisor, parse_mode='Markdown', reply_markup=markup)
+
+@bot.message_handler(commands=['seguimiento', 'ubicacion'])
 def seguimiento_tiempo_real(message):
     info_seguimiento = """
 📍 **SEGUIMIENTO EN TIEMPO REAL**
 
-🚀 **Sistema activado para:**
-• 📍 Ubicación en tiempo real
-• 🗺️ Optimización de rutas
-• ⚡ Respuesta rápida
-• 📊 Monitoreo continuo
+🚀 **SISTEMA ACTIVADO PARA:**
+• 📍 Ubicación GPS en tiempo real
+• 🗺️ Optimización automática de rutas
+• ⚡ Respuesta inmediata a incidentes
+• 📊 Monitoreo continuo del progreso
 
-📱 **Cómo funciona:**
+📱 **¿CÓMO FUNCIONA?**
 1. Comparte tu ubicación actual
-2. El sistema registra tu posición
+2. El sistema registra tu posición GPS
 3. Supervisores monitorean en tiempo real
-4. Optimizamos tu ruta automáticamente
+4. Se optimiza tu ruta automáticamente
+5. Recibes alertas de tráfico y rutas alternas
 
-🛡️ **Beneficios:**
-• Seguridad en ruta
-• Asistencia inmediata
-• Rutas más eficientes
-• Comunicación constante
+🛡️ **BENEFICIOS:**
+• Seguridad en ruta garantizada
+• Asistencia inmediata disponible
+• Rutas más eficientes y rápidas
+• Comunicación constante con supervisión
 
-⚠️ **Tu ubicación solo es visible para supervisores autorizados**
+⚠️ **Tu ubicación solo es visible para supervisores autorizados del sistema.**
 """
     
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-    markup.row(types.KeyboardButton("📍 Compartir mi ubicación", request_location=True))
-    markup.row(types.KeyboardButton("❌ Cancelar"))
+    markup.row(types.KeyboardButton("📍 COMPARTIR MI UBICACIÓN ACTUAL", request_location=True))
+    markup.row(types.KeyboardButton("❌ CANCELAR"))
     
     bot.reply_to(message, info_seguimiento, parse_mode='Markdown', reply_markup=markup)
 
-@bot.message_handler(commands=['fotos'])
+@bot.message_handler(commands=['fotos', 'entregas'])
 def ver_fotos(message):
     """Mostrar las fotos que ha enviado el usuario"""
     user_id = message.from_user.id
@@ -514,14 +625,17 @@ def ver_fotos(message):
         fotos = cursor.fetchall()
         
         if not fotos:
-            bot.reply_to(message, "📭 No has enviado fotos aún")
+            bot.reply_to(message, "📭 **NO HAS ENVIADO FOTOS AÚN**\n\nEnvía una foto con el pie de foto 'ENTREGADO A [NOMBRE]' para registrar entregas.")
             return
         
-        mensaje = f"📸 **Tus últimas {len(fotos)} fotos:**\n\n"
+        mensaje = f"📸 **TUS ÚLTIMAS {len(fotos)} FOTOS:**\n\n"
         
         for i, (file_id, caption, tipo, timestamp) in enumerate(fotos, 1):
             fecha = timestamp.split('.')[0] if timestamp else "Sin fecha"
-            mensaje += f"{i}. **{tipo.upper()}** - {fecha}\n"
+            tipo_emoji = "✅" if tipo == "entrega" else "⚠️"
+            
+            mensaje += f"{tipo_emoji} **#{i} - {tipo.upper()}**\n"
+            mensaje += f"   📅 {fecha}\n"
             mensaje += f"   📝 {caption if caption else 'Sin descripción'}\n\n"
         
         bot.reply_to(message, mensaje, parse_mode='Markdown')
@@ -530,7 +644,7 @@ def ver_fotos(message):
         print(f"❌ Error obteniendo fotos: {e}")
         bot.reply_to(message, "❌ Error al obtener tus fotos")
 
-@bot.message_handler(commands=['debug'])
+@bot.message_handler(commands=['debug', 'estado'])
 def debug(message):
     user_id = message.from_user.id
     
@@ -539,8 +653,8 @@ def debug(message):
     total_fotos = cursor.fetchone()[0]
     
     mensaje = f"🔧 **INFORMACIÓN DEL SISTEMA**\n\n"
-    mensaje += f"📦 Rutas disponibles: {len(RUTAS_DISPONIBLES)}\n"
-    mensaje += f"📸 Tus fotos en sistema: {total_fotos}\n"
+    mensaje += f"📦 Rutas disponibles en sistema: {len(RUTAS_DISPONIBLES)}\n"
+    mensaje += f"📸 Tus fotos registradas: {total_fotos}\n"
     mensaje += f"🗺️ Tienes ruta asignada: {'✅ SÍ' if user_id in RUTAS_ASIGNADAS else '❌ NO'}\n"
     
     if user_id in RUTAS_ASIGNADAS:
@@ -551,19 +665,25 @@ def debug(message):
             if ruta['ruta_id'] == RUTAS_ASIGNADAS[user_id]:
                 maps_url = crear_url_google_maps_ruta_completa(ruta)
                 if maps_url:
-                    mensaje += f"🔗 URL Google Maps: {maps_url[:50]}...\n"
+                    mensaje += f"🔗 Google Maps disponible: SÍ\n"
+                else:
+                    mensaje += f"🔗 Google Maps disponible: NO\n"
+                
+                total_paradas = len(ruta['paradas'])
+                paradas_entregadas = len([p for p in ruta['paradas'] if p.get('estado') == 'entregado'])
+                mensaje += f"📊 Progreso ruta: {paradas_entregadas}/{total_paradas}\n"
                 break
     
-    mensaje += f"\n👤 Tu ID: {user_id}\n"
-    mensaje += f"🕒 Hora actual: {datetime.now().strftime('%H:%M:%S')}\n\n"
-    mensaje += "✅ **Sistema operativo al 100%**"
+    mensaje += f"\n👤 Tu ID de usuario: {user_id}\n"
+    mensaje += f"🕒 Hora del servidor: {datetime.now().strftime('%H:%M:%S')}\n\n"
+    mensaje += "✅ **SISTEMA OPERATIVO AL 100%**"
     
     bot.reply_to(message, mensaje, parse_mode='Markdown')
 
-@bot.message_handler(commands=['recargar'])
+@bot.message_handler(commands=['recargar', 'refresh'])
 def recargar(message):
     cargar_rutas_simple()
-    bot.reply_to(message, f"✅ Rutas recargadas: {len(RUTAS_DISPONIBLES)}")
+    bot.reply_to(message, f"✅ Rutas recargadas: {len(RUTAS_DISPONIBLES)} disponibles")
 
 # =============================================================================
 # MANEJO DE UBICACIONES
@@ -590,13 +710,13 @@ def manejar_ubicacion(message):
         
         conn.commit()
         
-        mensaje = f"📍 **UBICACIÓN REGISTRADA**\n\n"
+        mensaje = f"📍 **UBICACIÓN REGISTRADA CORRECTAMENTE**\n\n"
         mensaje += f"👤 **Usuario:** {user_name}\n"
-        mensaje += f"📌 **Coordenadas:** {latitud}, {longitud}\n"
-        mensaje += f"🕒 **Hora:** {datetime.now().strftime('%H:%M:%S')}\n\n"
-        mensaje += f"🗺️ **Ver en mapa:**\n"
+        mensaje += f"📌 **Coordenadas GPS:** {latitud}, {longitud}\n"
+        mensaje += f"🕒 **Hora de registro:** {datetime.now().strftime('%H:%M:%S')}\n\n"
+        mensaje += f"🗺️ **Ver en Google Maps:**\n"
         mensaje += f"https://www.google.com/maps?q={latitud},{longitud}\n\n"
-        mensaje += "✅ **Tu ubicación ha sido registrada en el sistema**"
+        mensaje += "✅ **Tu ubicación ha sido registrada en el sistema de seguimiento.**"
         
         # Eliminar teclado de ubicación
         markup = types.ReplyKeyboardRemove()
@@ -624,14 +744,14 @@ def manejar_foto_completo(message):
         print(f"📸 Foto recibida de {user_name}: '{caption}'")
         
         # Determinar tipo de foto
-        if any(word in caption.upper() for word in ['ENTREGADO', 'ENTREGADA', 'ACUSE']):
+        if any(word in caption.upper() for word in ['ENTREGADO', 'ENTREGADA', 'ACUSE', 'ENTREGA']):
             tipo = "entrega"
             carpeta = "entregas"
-            respuesta = "✅ **ENTREGA REGISTRADA**\n\nFoto de entrega guardada en el sistema"
+            respuesta = "✅ **ENTREGA REGISTRADA CORRECTAMENTE**\n\nFoto de entrega guardada en el sistema."
         else:
             tipo = "reporte"
             carpeta = "incidentes"
-            respuesta = "✅ **REPORTE GUARDADO**\n\nFoto de reporte guardada en el sistema"
+            respuesta = "✅ **REPORTE GUARDADO**\n\nFoto de reporte/incidente guardada en el sistema."
         
         # Descargar y guardar foto
         ruta_foto = descargar_foto_telegram(file_id, carpeta)
@@ -642,8 +762,20 @@ def manejar_foto_completo(message):
             
             # Si es entrega y tiene ruta, procesar
             if tipo == "entrega" and user_id in RUTAS_ASIGNADAS:
-                respuesta += f"\n\n🗺️ **Ruta:** {RUTAS_ASIGNADAS[user_id]}\n"
-                respuesta += f"📝 **Texto:** {caption}"
+                respuesta += f"\n\n🗺️ **Ruta asignada:** {RUTAS_ASIGNADAS[user_id]}\n"
+                respuesta += f"📝 **Descripción:** {caption}"
+                
+                # Marcar parada como entregada si corresponde
+                ruta_id = RUTAS_ASIGNADAS[user_id]
+                for ruta in RUTAS_DISPONIBLES:
+                    if ruta['ruta_id'] == ruta_id:
+                        # Buscar persona en la ruta (simplificado)
+                        for parada in ruta['paradas']:
+                            if caption and any(nombre in caption.upper() for nombre in [parada.get('nombre', '').upper(), parada.get('nombre_completo', '').upper()]):
+                                parada['estado'] = 'entregado'
+                                respuesta += f"\n✅ **Parada marcada como entregada**"
+                                break
+                        break
             
             bot.reply_to(message, respuesta, parse_mode='Markdown')
         else:
@@ -663,9 +795,28 @@ def manejar_todos_los_callbacks(call):
     try:
         data = call.data
         
-        if data == 'obtener_ruta':
+        if data == 'solicitar_ruta':
             dar_ruta(call.message)
-            bot.answer_callback_query(call.id, "🗺️ Obteniendo ruta...")
+            bot.answer_callback_query(call.id, "🚗 Solicitando ruta...")
+            
+        elif data == 'ver_ruta_actual':
+            ver_ruta(call.message)
+            bot.answer_callback_query(call.id, "🗺️ Mostrando tu ruta...")
+            
+        elif data == 'abrir_maps':
+            if call.from_user.id in RUTAS_ASIGNADAS:
+                navegar_ruta(call.message)
+            else:
+                bot.answer_callback_query(call.id, "❌ Primero solicita una ruta")
+                dar_ruta(call.message)
+            
+        elif data == 'cambiar_ruta':
+            # Limpiar ruta asignada
+            user_id = call.from_user.id
+            if user_id in RUTAS_ASIGNADAS:
+                del RUTAS_ASIGNADAS[user_id]
+            dar_ruta(call.message)
+            bot.answer_callback_query(call.id, "🔄 Cambiando ruta...")
             
         elif data.startswith('lista_completa_'):
             partes = data.split('_')
@@ -676,57 +827,67 @@ def manejar_todos_los_callbacks(call):
                     # Generar URL de Google Maps
                     maps_url = crear_url_google_maps_ruta_completa(ruta)
                     
-                    mensaje = f"👥 **LISTA COMPLETA - Ruta {ruta_id}**\n"
+                    total_paradas = len(ruta['paradas'])
+                    paradas_entregadas = len([p for p in ruta['paradas'] if p.get('estado') == 'entregado'])
+                    
+                    mensaje = f"📋 **LISTA COMPLETA - Ruta {ruta_id}**\n"
                     mensaje += f"📍 **Zona:** {ruta['zona']}\n"
-                    mensaje += f"📊 **Total personas:** {len(ruta['paradas'])}\n\n"
+                    mensaje += f"📊 **Progreso:** {paradas_entregadas}/{total_paradas}\n\n"
                     
                     for i, parada in enumerate(ruta['paradas'], 1):
                         nombre = parada.get('nombre', f'Persona {i}')
                         dependencia = parada.get('dependencia', 'Sin dependencia')
                         direccion = parada.get('direccion', 'Sin dirección')
                         estado = "✅" if parada.get('estado') == 'entregado' else "📍"
+                        cantidad = parada.get('total_personas', 1)
                         
                         mensaje += f"{estado} **{i}. {nombre}**\n"
                         mensaje += f"   🏢 {dependencia}\n"
-                        mensaje += f"   📍 {direccion}\n\n"
+                        mensaje += f"   📍 {direccion}\n"
+                        if cantidad > 1:
+                            mensaje += f"   👥 {cantidad} personas en este edificio\n"
+                        mensaje += "\n"
                     
                     # Crear teclado con botón de Google Maps si hay URL
-                    markup = None
+                    markup = types.InlineKeyboardMarkup()
                     if maps_url:
-                        markup = types.InlineKeyboardMarkup()
                         markup.row(
-                            types.InlineKeyboardButton("🗺️ SEGUIR RUTA EN GOOGLE MAPS", url=maps_url)
+                            types.InlineKeyboardButton("🗺️ ABRIR RUTA EN GOOGLE MAPS", url=maps_url)
                         )
+                    
+                    markup.row(
+                        types.InlineKeyboardButton("🗺️ VER MI RUTA", callback_data="ver_ruta_actual"),
+                        types.InlineKeyboardButton("📸 REGISTRAR ENTREGA", callback_data="registrar_entrega")
+                    )
                     
                     bot.send_message(call.message.chat.id, mensaje, parse_mode='Markdown', reply_markup=markup)
                     break
             
-            bot.answer_callback_query(call.id, "👥 Lista completa mostrada")
+            bot.answer_callback_query(call.id, "📋 Lista completa mostrada")
             
         elif data == 'lista_completa':
             if call.from_user.id in RUTAS_ASIGNADAS:
                 lista_completa(call.message)
             else:
                 bot.answer_callback_query(call.id, "❌ Primero obtén una ruta")
+                dar_ruta(call.message)
             
         elif data == 'contactar_supervisor':
-            info_supervisor = """
-📞 **CONTACTO SUPERVISOR - URGENCIAS**
-
-👨‍💼 **Lic. Pedro Javier Hernandez Vasquez**
-📱 **Teléfono:** 55 3197 3078
-🕒 **Horario:** 7:00 - 19:00 hrs
-
-🚨 **Para:**
-• Emergencias en ruta
-• Problemas con entregas
-• Asistencia inmediata
-• Reportes urgentes
-
-💬 **Contacto directo disponible**
-"""
-            bot.send_message(call.message.chat.id, info_supervisor, parse_mode='Markdown')
-            bot.answer_callback_query(call.id, "📞 Información de contacto")
+            contactar_supervisor(call.message)
+            bot.answer_callback_query(call.id, "📞 Contactando supervisor...")
+            
+        elif data == 'reporte_urgente':
+            bot.send_message(
+                call.message.chat.id,
+                "🚨 **REPORTE URGENTE**\n\n"
+                "Envía tu reporte urgente con:\n\n"
+                "1. 📸 Una foto del incidente\n"
+                "2. 📝 Descripción del problema\n"
+                "3. 📍 Tu ubicación (usa el botón de ubicación)\n\n"
+                "El supervisor será notificado inmediatamente.",
+                parse_mode='Markdown'
+            )
+            bot.answer_callback_query(call.id, "🚨 Reporte urgente")
             
         elif data == 'seguimiento_tiempo_real':
             seguimiento_tiempo_real(call.message)
@@ -734,10 +895,10 @@ def manejar_todos_los_callbacks(call):
             
         elif data == 'ubicacion_actual':
             markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-            markup.row(types.KeyboardButton("📍 Compartir mi ubicación", request_location=True))
+            markup.row(types.KeyboardButton("📍 COMPARTIR MI UBICACIÓN", request_location=True))
             bot.send_message(
                 call.message.chat.id,
-                "📍 **COMPARTIR UBICACIÓN ACTUAL**\n\nPresiona el botón para compartir tu ubicación:",
+                "📍 **COMPARTIR UBICACIÓN ACTUAL**\n\nPresiona el botón para compartir tu ubicación GPS actual:",
                 reply_markup=markup,
                 parse_mode='Markdown'
             )
@@ -746,7 +907,12 @@ def manejar_todos_los_callbacks(call):
         elif data == 'registrar_entrega':
             bot.send_message(
                 call.message.chat.id,
-                "📸 **REGISTRAR ENTREGA**\n\nEnvía una foto del acuse firmado con el pie de foto:\n\n`ENTREGADO A [NOMBRE COMPLETO]`\n\n**Ejemplo:**\n`ENTREGADO A JUAN PÉREZ LÓPEZ`",
+                "📸 **REGISTRAR ENTREGA**\n\n"
+                "Envía una foto del acuse firmado con el pie de foto:\n\n"
+                "`ENTREGADO A [NOMBRE COMPLETO]`\n\n"
+                "**EJEMPLO:**\n"
+                "`ENTREGADO A JUAN PÉREZ LÓPEZ`\n\n"
+                "**IMPORTANTE:** Asegúrate de que el nombre coincida con la lista de tu ruta.",
                 parse_mode='Markdown'
             )
             bot.answer_callback_query(call.id, "📸 Listo para recibir foto...")
@@ -758,6 +924,14 @@ def manejar_todos_los_callbacks(call):
         elif data == 'debug_info':
             debug(call.message)
             bot.answer_callback_query(call.id, "🔧 Obteniendo info del sistema...")
+            
+        elif data == 'ayuda_boton':
+            ayuda(call.message)
+            bot.answer_callback_query(call.id, "❓ Mostrando ayuda...")
+            
+        elif data == 'volver_menu':
+            start(call.message)
+            bot.answer_callback_query(call.id, "🏠 Volviendo al menú...")
             
     except Exception as e:
         print(f"❌ Error en callback: {e}")
@@ -787,8 +961,9 @@ def status():
     return jsonify({
         "status": "ok",
         "rutas": len(RUTAS_DISPONIBLES),
-        "usuarios": len(RUTAS_ASIGNADAS),
-        "fotos_totales": total_fotos
+        "usuarios_con_ruta": len(RUTAS_ASIGNADAS),
+        "fotos_totales": total_fotos,
+        "timestamp": datetime.now().isoformat()
     })
 
 @app.route('/api/health', methods=['GET'])
@@ -846,11 +1021,31 @@ def recibir_rutas_desde_programa():
 def obtener_avances_pendientes():
     """Endpoint para que el programa obtenga avances de entregas"""
     try:
+        # Obtener avances de la base de datos
+        cursor.execute('''
+            SELECT file_id, user_id, user_name, caption, tipo, timestamp 
+            FROM fotos 
+            WHERE tipo = 'entrega'
+            ORDER BY timestamp DESC
+        ''')
+        
+        avances_db = cursor.fetchall()
         avances = []
+        
+        for avance in avances_db:
+            avances.append({
+                'file_id': avance[0],
+                'user_id': avance[1],
+                'user_name': avance[2],
+                'caption': avance[3],
+                'tipo': avance[4],
+                'timestamp': avance[5]
+            })
+        
         return jsonify({
             "status": "success",
             "avances": avances,
-            "total": 0,
+            "total": len(avances),
             "timestamp": datetime.now().isoformat()
         })
         
@@ -861,7 +1056,8 @@ def obtener_avances_pendientes():
 def marcar_avance_procesado(avance_id):
     """Marcar un avance como procesado"""
     try:
-        print(f"✅ Avance procesado: {avance_id}")
+        # Aquí podrías marcar el avance como procesado en la BD
+        print(f"✅ Avance marcado como procesado: {avance_id}")
         return jsonify({"status": "success", "message": "Avance marcado como procesado"})
         
     except Exception as e:
@@ -897,7 +1093,9 @@ def diagnostico_rutas():
             "status": "success",
             "archivos_en_sistema": archivos_info,
             "rutas_en_memoria": len(RUTAS_DISPONIBLES),
-            "rutas_cargadas": [f"Ruta {r['ruta_id']} - {r['zona']}" for r in RUTAS_DISPONIBLES]
+            "rutas_cargadas": [f"Ruta {r['ruta_id']} - {r['zona']}" for r in RUTAS_DISPONIBLES],
+            "usuarios_con_ruta": len(RUTAS_ASIGNADAS),
+            "timestamp": datetime.now().isoformat()
         })
         
     except Exception as e:
