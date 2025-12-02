@@ -19,6 +19,7 @@ from PIL import Image, ImageTk
 import io
 import math
 import re
+import urllib.parse
 
 # =============================================================================
 # CLASE CONEXIÓN CON BOT RAILWAY - MEJORADA (COMPLETA)
