@@ -319,15 +319,16 @@ class GestorTelegram:
             return False
 
 # =============================================================================
-# CLASE PRINCIPAL - MOTOR DE RUTAS (CoreRouteGenerator) - VERSIÓN RECONSTRUIDA
+# CLASE PRINCIPAL - MOTOR DE RUTAS (CoreRouteGenerator) - RECONSTRUIDA
 # =============================================================================
 class CoreRouteGenerator:
-    def __init__(self, df, api_key, origen_coords, origen_name, max_stops_per_route):
+    def __init__(self, df, api_key, origen_coords, origen_name, max_stops_per_route=8):
         self.df = df.copy()
         self.api_key = api_key
         self.origen_coords = origen_coords
         self.origen_name = origen_name
-        self.max_stops_per_route = max_stops_per_route
+        self.MAX_EDIFICIOS_POR_RUTA = 8  # Máximo de edificios por ruta
+        self.MIN_EDIFICIOS_POR_RUTA = 6  # Mínimo de edificios por ruta
         self.results = []
         self.log_messages = []
         self.CACHE_FILE = "geocode_cache.json"
@@ -347,22 +348,18 @@ class CoreRouteGenerator:
             'CENTRO': '#FF6B6B', 'SUR': '#4ECDC4', 'ORIENTE': '#45B7D1',
             'SUR_ORIENTE': '#96CEB4', 'OTRAS': '#FECA57', 'MIXTA': '#9B59B6'
         }
-        self.ICONOS = {
-            'CENTRO': 'building', 'SUR': 'home', 'ORIENTE': 'industry',
-            'SUR_ORIENTE': 'tree', 'OTRAS': 'map-marker', 'MIXTA': 'star'
-        }
         
-        # 🎯 NOMBRES DE COLUMNAS PERSONALIZADOS PARA TU EXCEL
+        # 🎯 NOMBRES DE COLUMNAS PERSONALIZADOS
         self.COLUMNAS = {
             'NOMBRE': 'NOMBRE',
-            'ADSCRIPCION': 'ADSCRIPCIÓN',  # CON TILDE como en tu Excel
-            'DIRECCION': 'DIRECCIÓN',      # CON TILDE como en tu Excel
-            'ALCALDIA': 'ALCALDÍA',        # CON TILDE como en tu Excel
+            'ADSCRIPCION': 'ADSCRIPCIÓN',
+            'DIRECCION': 'DIRECCIÓN',
+            'ALCALDIA': 'ALCALDÍA',
             'NOTAS': 'NOTAS'
         }
         
         self._log("✅ CoreRouteGenerator inicializado correctamente")
-        self._log(f"📊 Columnas configuradas: {self.COLUMNAS}")
+        self._log(f"🏢 Configuración: {self.MIN_EDIFICIOS_POR_RUTA}-{self.MAX_EDIFICIOS_POR_RUTA} edificios por ruta")
 
     def _log(self, message):
         """Registro de mensajes del sistema"""
@@ -397,7 +394,6 @@ class CoreRouteGenerator:
         for titulo in titulos:
             if nombre_lower.startswith(titulo + ' '):
                 nombre_str = nombre_str[len(titulo):].strip()
-                # También quitar posible punto después del título
                 if nombre_str.startswith('. '):
                     nombre_str = nombre_str[2:].strip()
                 elif nombre_str.startswith('.'):
@@ -410,7 +406,7 @@ class CoreRouteGenerator:
         return nombre_str
 
     def _extraer_datos_persona(self, fila):
-        """Extraer datos de una persona/fila con los nombres correctos de columnas"""
+        """Extraer datos de una persona/fila"""
         try:
             nombre_completo = str(fila.get(self.COLUMNAS['NOMBRE'], '')).strip()
             nombre_limpio = self._limpiar_titulo_nombre(nombre_completo)
@@ -419,7 +415,7 @@ class CoreRouteGenerator:
                 'nombre_completo': nombre_completo,
                 'nombre': nombre_limpio,
                 'adscripcion': str(fila.get(self.COLUMNAS['ADSCRIPCION'], '')).strip(),
-                'dependencia': str(fila.get(self.COLUMNAS['ADSCRIPCION'], '')).strip(),  # Mismo que adscripción
+                'dependencia': str(fila.get(self.COLUMNAS['ADSCRIPCION'], '')).strip(),
                 'direccion': str(fila.get(self.COLUMNAS['DIRECCION'], '')).strip(),
                 'alcaldia': str(fila.get(self.COLUMNAS['ALCALDIA'], '')).strip(),
                 'notas': str(fila.get(self.COLUMNAS['NOTAS'], '')).strip(),
@@ -532,10 +528,6 @@ class CoreRouteGenerator:
         
         return direccion_str.strip()
 
-    # =========================================================================
-    # MÉTODOS DE AGRUPAMIENTO
-    # =========================================================================
-    
     def _calcular_distancia(self, coord1, coord2):
         """Calcular distancia en kilómetros entre dos coordenadas"""
         try:
@@ -552,88 +544,178 @@ class CoreRouteGenerator:
             c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
             return R * c
         except:
-            return 9999  # Valor alto para indicar error
+            return 9999
 
-    def _agrupar_ubicaciones_similares(self, filas):
-        """Agrupar personas en la misma ubicación física"""
-        grupos = []
-        direcciones_procesadas = []
+    # =========================================================================
+    # MÉTODOS DE AGRUPAMIENTO POR EDIFICIO
+    # =========================================================================
+    
+    def _agrupar_personas_por_edificio(self):
+        """Agrupar todas las personas por edificio/dirección"""
+        self._log("🏢 Iniciando agrupamiento por edificio...")
         
-        # Primero procesar todas las direcciones
-        for _, fila in filas.iterrows():
+        edificios = {}
+        
+        for idx, fila in self.df.iterrows():
             datos_persona = self._extraer_datos_persona(fila)
             direccion = datos_persona['direccion']
             
-            if not direccion or direccion in ['nan', '', 'Sin dirección']:
+            if not direccion or direccion in ['', 'Sin dirección', 'nan']:
+                self._log(f"⚠️ Fila {idx}: Sin dirección válida")
                 continue
             
-            # Normalizar dirección para comparación
+            # Normalizar dirección para agrupar
             direccion_normalizada = self._normalizar_direccion(direccion)
             
-            # Buscar si ya tenemos una dirección similar
-            agrupado = False
-            for i, (dir_existente, grupo_existente) in enumerate(grupos):
-                # Comparar direcciones normalizadas
-                if direccion_normalizada == dir_existente:
-                    grupo_existente.append(datos_persona)
-                    agrupado = True
-                    break
+            if not direccion_normalizada:
+                continue
             
-            if not agrupado:
-                # Verificar por coordenadas
-                coords = self._geocode(direccion)
-                if coords:
-                    # Buscar si hay coordenadas cercanas
-                    for i, (coords_existentes, grupo_existente) in enumerate(grupos):
-                        if coords_existentes and self._calcular_distancia(coords, coords_existentes) < 0.05:  # 50 metros
-                            grupo_existente.append(datos_persona)
-                            agrupado = True
-                            break
-                    
-                    if not agrupado:
-                        grupos.append((coords, [datos_persona]))
-                else:
-                    # Si no hay coordenadas, agrupar por dirección normalizada
-                    grupos.append((None, [datos_persona]))
+            # Crear clave única para el edificio
+            clave_edificio = f"{direccion_normalizada}_{datos_persona['alcaldia']}"
+            
+            if clave_edificio not in edificios:
+                edificios[clave_edificio] = {
+                    'direccion_original': direccion,
+                    'direccion_normalizada': direccion_normalizada,
+                    'alcaldia': datos_persona['alcaldia'],
+                    'dependencia_principal': datos_persona['dependencia'],
+                    'personas': [],
+                    'coordenadas': None,
+                    'total_personas': 0
+                }
+            
+            edificios[clave_edificio]['personas'].append(datos_persona)
+            edificios[clave_edificio]['total_personas'] += 1
         
-        self._log(f"📍 Agrupamiento completado: {len(grupos)} ubicaciones únicas")
-        return grupos
+        self._log(f"📍 Total edificios únicos encontrados: {len(edificios)}")
+        
+        # Obtener coordenadas para cada edificio
+        self._log("🗺️ Obteniendo coordenadas para edificios...")
+        edificios_con_coords = {}
+        
+        for clave, edificio in edificios.items():
+            coords = self._geocode(edificio['direccion_original'])
+            if coords:
+                edificio['coordenadas'] = coords
+                edificios_con_coords[clave] = edificio
+            else:
+                self._log(f"⚠️ No se pudieron obtener coordenadas para: {edificio['direccion_original'][:50]}...")
+        
+        self._log(f"✅ Edificios con coordenadas válidas: {len(edificios_con_coords)}/{len(edificios)}")
+        return edificios_con_coords
+
+    def _asignar_zona_a_edificio(self, alcaldia):
+        """Asignar zona basada en la alcaldía"""
+        alcaldia_str = str(alcaldia).upper()
+        
+        if any(alc in alcaldia_str for alc in ['CUAUHTEMOC', 'MIGUEL HIDALGO', 'BENITO JUAREZ']):
+            return 'CENTRO'
+        elif any(alc in alcaldia_str for alc in ['ALVARO OBREGON', 'COYOACAN', 'TLALPAN']):
+            return 'SUR'
+        elif any(alc in alcaldia_str for alc in ['IZTAPALAPA', 'GUSTAVO A. MADERO', 'VENUSTIANO CARRANZA']):
+            return 'ORIENTE'
+        else:
+            return 'OTRAS'
+
+    def _organizar_edificios_por_zona(self, edificios):
+        """Organizar edificios por zona geográfica"""
+        edificios_por_zona = {}
+        
+        for clave, edificio in edificios.items():
+            zona = self._asignar_zona_a_edificio(edificio['alcaldia'])
+            edificio['zona'] = zona
+            
+            if zona not in edificios_por_zona:
+                edificios_por_zona[zona] = []
+            
+            edificios_por_zona[zona].append(edificio)
+        
+        # Mostrar distribución
+        self._log("📊 Distribución de edificios por zona:")
+        for zona, lista_edificios in edificios_por_zona.items():
+            total_personas = sum(e['total_personas'] for e in lista_edificios)
+            self._log(f"   {zona}: {len(lista_edificios)} edificios, {total_personas} personas")
+        
+        return edificios_por_zona
 
     # =========================================================================
-    # MÉTODOS DE OPTIMIZACIÓN DE RUTAS
+    # MÉTODOS DE CREACIÓN DE RUTAS
     # =========================================================================
     
-    def _optimizar_ruta(self, indices):
-        """Optimizar ruta usando Google Directions API"""
-        filas = self.df.loc[indices]
+    def _crear_grupos_edificios_por_ruta(self, edificios_por_zona):
+        """Crear grupos de 6-8 edificios por ruta"""
+        self._log("📦 Creando grupos de edificios para rutas...")
         
-        # Agrupar ubicaciones similares
-        grupos_ubicaciones = self._agrupar_ubicaciones_similares(filas)
+        todas_las_rutas = []
         
-        if len(grupos_ubicaciones) == 0:
-            self._log("⚠️ No hay ubicaciones válidas para optimizar")
-            return [], [], 0, 0, None
+        for zona, edificios in edificios_por_zona.items():
+            if len(edificios) == 0:
+                continue
+            
+            self._log(f"   Zona {zona}: {len(edificios)} edificios")
+            
+            # Ordenar edificios por proximidad (si tienen coordenadas)
+            edificios_con_coords = [e for e in edificios if e['coordenadas']]
+            edificios_sin_coords = [e for e in edificios if not e['coordenadas']]
+            
+            # Si hay suficientes edificios con coordenadas, intentar ordenarlos
+            if len(edificios_con_coords) > 1:
+                try:
+                    # Ordenar por proximidad usando el origen como referencia
+                    origen_coords = list(map(float, self.origen_coords.split(',')))
+                    edificios_con_coords.sort(key=lambda e: self._calcular_distancia(origen_coords, e['coordenadas']))
+                except:
+                    pass
+            
+            # Combinar listas
+            edificios_ordenados = edificios_con_coords + edificios_sin_coords
+            
+            # Dividir en grupos de 6-8 edificios
+            grupos = []
+            current_group = []
+            
+            for i, edificio in enumerate(edificios_ordenados):
+                current_group.append(edificio)
+                
+                # Reglas para cerrar grupo:
+                # 1. Si alcanza el máximo (8)
+                # 2. Si es el último edificio
+                # 3. Si tiene al menos el mínimo (6) y quedan menos del mínimo
+                if (len(current_group) >= self.MAX_EDIFICIOS_POR_RUTA or 
+                    i == len(edificios_ordenados) - 1 or
+                    (len(current_group) >= self.MIN_EDIFICIOS_POR_RUTA and 
+                     len(edificios_ordenados) - i - 1 < self.MIN_EDIFICIOS_POR_RUTA)):
+                    
+                    # Solo crear ruta si tiene al menos 2 edificios
+                    if len(current_group) >= 2:
+                        grupos.append({
+                            'zona': zona,
+                            'edificios': current_group.copy(),
+                            'total_edificios': len(current_group),
+                            'total_personas': sum(e['total_personas'] for e in current_group)
+                        })
+                        current_group = []
+            
+            self._log(f"   → Se crearán {len(grupos)} rutas para {zona}")
+            todas_las_rutas.extend(grupos)
         
-        # Separar coordenadas y datos
-        coords_list = []
-        filas_agrupadas = []
+        return todas_las_rutas
+
+    def _optimizar_ruta_edificios(self, edificios):
+        """Optimizar ruta para un grupo de edificios"""
+        if len(edificios) < 2:
+            return edificios, [], 0, 0, None
         
-        for coords, grupo in grupos_ubicaciones:
-            if coords:  # Solo incluir si tiene coordenadas
-                coords_list.append(coords)
-                filas_agrupadas.append({
-                    'coordenadas': coords,
-                    'personas': grupo,
-                    'cantidad_personas': len(grupo)
-                })
+        # Filtrar edificios con coordenadas
+        edificios_con_coords = [e for e in edificios if e['coordenadas']]
         
-        if len(coords_list) < 2:
-            self._log(f"⚠️ Solo {len(coords_list)} coordenadas válidas")
-            return filas_agrupadas, coords_list, 0, 0, None
+        if len(edificios_con_coords) < 2:
+            return edificios, [], 0, 0, None
         
-        # Llamar a Google Directions API
         try:
-            waypoints = "|".join([f"{lat},{lng}" for lat, lng in coords_list])
+            # Preparar waypoints para Google Directions API
+            waypoints = "|".join([f"{coord[0]},{coord[1]}" for e in edificios_con_coords for coord in [e['coordenadas']]])
+            
             url = "https://maps.googleapis.com/maps/api/directions/json"
             params = {
                 'origin': self.origen_coords,
@@ -652,67 +734,64 @@ class CoreRouteGenerator:
                 orden = route['waypoint_order']
                 poly = route['overview_polyline']['points']
                 
-                # Calcular distancia y tiempo total
+                # Reordenar edificios según optimización
+                edificios_opt = [edificios_con_coords[i] for i in orden]
+                
+                # Calcular distancia y tiempo
                 distancia_total = sum(leg['distance']['value'] for leg in route['legs']) / 1000  # km
                 tiempo_total = sum(leg['duration']['value'] for leg in route['legs']) / 60  # minutos
                 
-                # Reordenar según optimización
-                filas_opt = [filas_agrupadas[i] for i in orden]
-                coords_opt = [coords_list[i] for i in orden]
+                # Agregar edificios sin coordenadas al final
+                edificios_sin_coords = [e for e in edificios if not e['coordenadas']]
+                edificios_opt.extend(edificios_sin_coords)
                 
-                self._log(f"✅ Ruta optimizada: {len(filas_opt)} paradas, {distancia_total:.1f} km, {tiempo_total:.0f} min")
-                return filas_opt, coords_opt, tiempo_total, distancia_total, poly
+                # Obtener coordenadas ordenadas
+                coords_opt = [e['coordenadas'] for e in edificios_opt if e['coordenadas']]
+                
+                self._log(f"✅ Ruta optimizada: {len(edificios_opt)} edificios, {distancia_total:.1f} km, {tiempo_total:.0f} min")
+                return edificios_opt, coords_opt, tiempo_total, distancia_total, poly
             else:
-                self._log(f"❌ Error Directions API: {data.get('status')}")
-                return filas_agrupadas, coords_list, 0, 0, None
+                self._log(f"⚠️ No se pudo optimizar ruta: {data.get('status')}")
+                return edificios, [], 0, 0, None
                 
         except Exception as e:
             self._log(f"❌ Error optimizando ruta: {e}")
-            return filas_agrupadas, coords_list, 0, 0, None
+            return edificios, [], 0, 0, None
 
     # =========================================================================
     # MÉTODOS DE CREACIÓN DE ARCHIVOS
     # =========================================================================
     
-    def _crear_excel_ruta(self, zona, filas_opt, ruta_id):
+    def _crear_excel_ruta(self, zona, edificios_opt, ruta_id):
         """Crear archivo Excel para la ruta"""
         try:
             excel_data = []
             orden_parada = 1
             
-            for grupo in filas_opt:
-                coordenadas_grupo = grupo['coordenadas']
-                personas_grupo = grupo['personas']
-                cantidad_personas = grupo['cantidad_personas']
-                
-                for i, persona in enumerate(personas_grupo, 1):
+            for edificio in edificios_opt:
+                for i, persona in enumerate(edificio['personas'], 1):
                     # Crear link para foto
-                    link_foto_base = f"fotos_entregas/Ruta_{ruta_id}_Parada_{orden_parada}"
-                    if cantidad_personas > 1:
-                        link_foto_base += f"_Persona_{i}"
+                    link_foto = f"=HIPERVINCULO(\"fotos_entregas/Ruta_{ruta_id}_Edificio_{orden_parada}_Persona_{i}.jpg\", \"📸 VER FOTO\")"
                     
-                    link_foto = f"=HIPERVINCULO(\"{link_foto_base}.jpg\", \"📸 VER FOTO\")"
-                    
-                    # 🎯 DATOS CORRECTOS DE TU EXCEL
                     excel_data.append({
-                        'Orden_Parada': orden_parada,
-                        'Sub_Orden': i if cantidad_personas > 1 else '',
+                        'Orden_Edificio': orden_parada,
+                        'Orden_Persona': i,
+                        'Edificio': edificio.get('direccion_original', 'Sin dirección'),
                         'Nombre_Completo': persona['nombre_completo'],
                         'Nombre': persona['nombre'],
-                        'Dependencia': persona['dependencia'],  # 🎯 ADSCRIPCIÓN
-                        'Adscripción': persona['adscripcion'],   # 🎯 MISMO QUE DEPENDENCIA
+                        'Dependencia': persona['dependencia'],
+                        'Adscripción': persona['adscripcion'],
                         'Dirección': persona['direccion'],
                         'Alcaldía': persona['alcaldia'],
                         'Notas': persona['notas'],
-                        'Personas_Misma_Ubicacion': cantidad_personas,
+                        'Personas_Mismo_Edificio': edificio['total_personas'],
                         'Acuse': 'PENDIENTE',
                         'Repartidor': '',
                         'Foto_Acuse': link_foto,
                         'Timestamp_Entrega': '',
                         'Estado': 'PENDIENTE',
-                        'Coordenadas': f"{coordenadas_grupo[0]},{coordenadas_grupo[1]}",
-                        'Es_Misma_Parada': 'SÍ' if cantidad_personas > 1 else 'NO',
-                        'Info_Grupo': f"Grupo de {cantidad_personas} personas" if cantidad_personas > 1 else ''
+                        'Coordenadas': f"{edificio['coordenadas'][0]},{edificio['coordenadas'][1]}" if edificio['coordenadas'] else '',
+                        'Zona': zona
                     })
                 
                 orden_parada += 1
@@ -721,19 +800,17 @@ class CoreRouteGenerator:
             excel_df = pd.DataFrame(excel_data)
             excel_file = f"rutas_excel/Ruta_{ruta_id}_{zona}.xlsx"
             
-            # Asegurar que exista la carpeta
             os.makedirs("rutas_excel", exist_ok=True)
-            
             excel_df.to_excel(excel_file, index=False)
-            self._log(f"📊 Excel generado: {excel_file} ({len(excel_data)} registros)")
             
+            self._log(f"📊 Excel generado: {excel_file} ({len(excel_data)} registros, {len(edificios_opt)} edificios)")
             return excel_file
             
         except Exception as e:
             self._log(f"❌ Error creando Excel: {e}")
             return None
 
-    def _crear_mapa_ruta(self, zona, filas_opt, coords_opt, tiempo, dist, poly, ruta_id):
+    def _crear_mapa_ruta(self, zona, edificios_opt, coords_opt, tiempo, dist, poly, ruta_id):
         """Crear mapa interactivo con Folium"""
         try:
             # Crear mapa
@@ -759,52 +836,40 @@ class CoreRouteGenerator:
                     popup=f"Ruta {ruta_id} - {zona}"
                 ).add_to(m)
             
-            # 🎯 MARCAR PARADAS CON INFORMACIÓN COMPLETA
-            for i, (grupo, coord) in enumerate(zip(filas_opt, coords_opt), 1):
-                cantidad_personas = grupo['cantidad_personas']
-                primera_persona = grupo['personas'][0]
+            # Marcadores para edificios
+            for i, (edificio, coord) in enumerate(zip(edificios_opt, coords_opt), 1):
+                if not coord:
+                    continue
                 
-                # Crear popup HTML detallado
+                # Crear popup HTML
                 popup_html = f"""
                 <div style="font-family: Arial; width: 350px;">
                     <h4 style="color: {color}; margin: 0 0 10px;">
-                        📍 Parada #{i} - {zona}
+                        🏢 Edificio #{i} - {zona}
                     </h4>
-                    <b>🏢 {primera_persona['nombre']}</b><br>
-                    <small>{primera_persona['dependencia']}</small><hr style="margin: 8px 0;">
-                    <small><b>📌 Dirección:</b><br>{primera_persona['direccion'][:100]}...</small>
+                    <b>📍 {edificio.get('direccion_original', 'Sin dirección')[:50]}...</b><br>
+                    <small>👥 {edificio['total_personas']} personas</small><hr style="margin: 8px 0;">
+                    <small><b>Personas en este edificio:</b></small><br>
                 """
                 
-                if cantidad_personas > 1:
-                    popup_html += f"""<hr style="margin: 8px 0;">
-                    <small><b>👥 Personas en esta ubicación ({cantidad_personas}):</b></small><br>"""
-                    
-                    for j, persona in enumerate(grupo['personas'][:4], 1):
-                        popup_html += f"<small>• {persona['nombre']}</small><br>"
-                    
-                    if cantidad_personas > 4:
-                        popup_html += f"<small>• ... y {cantidad_personas-4} más</small><br>"
+                for j, persona in enumerate(edificio['personas'][:4], 1):
+                    popup_html += f"<small>• {persona['nombre']}</small><br>"
+                
+                if edificio['total_personas'] > 4:
+                    popup_html += f"<small>• ... y {edificio['total_personas']-4} más</small>"
                 
                 popup_html += "</div>"
-                
-                # Icono según tipo de parada
-                if cantidad_personas > 1:
-                    icon_color = 'orange'
-                    icon_type = 'building'
-                else:
-                    icon_color = 'red'
-                    icon_type = 'user'
                 
                 folium.Marker(
                     coord,
                     popup=popup_html,
-                    tooltip=f"Parada #{i}: {primera_persona['nombre'][:20]}...",
-                    icon=folium.Icon(color=icon_color, icon=icon_type, prefix='fa')
+                    tooltip=f"Edificio #{i}: {edificio['total_personas']} personas",
+                    icon=folium.Icon(color='red', icon='building', prefix='fa')
                 ).add_to(m)
             
             # Panel informativo
-            total_personas = sum(grupo['cantidad_personas'] for grupo in filas_opt)
-            total_paradas = len(filas_opt)
+            total_personas = sum(e['total_personas'] for e in edificios_opt)
+            total_edificios = len(edificios_opt)
             
             info_panel_html = f"""
             <div style="position:fixed; top:10px; left:50px; z-index:1000; background:white; 
@@ -814,7 +879,7 @@ class CoreRouteGenerator:
                     Ruta {ruta_id} - {zona}
                 </h4>
                 <small>
-                    <b>🏢 Paradas (Edificios):</b> {total_paradas}<br>
+                    <b>🏢 Edificios:</b> {total_edificios}<br>
                     <b>👥 Personas:</b> {total_personas}<br>
                     <b>📏 Distancia:</b> {dist:.1f} km<br>
                     <b>⏱️ Tiempo estimado:</b> {tiempo:.0f} min<br>
@@ -836,102 +901,17 @@ class CoreRouteGenerator:
             self._log(f"❌ Error creando mapa: {e}")
             return None
 
-    def _crear_json_telegram(self, zona, filas_opt, coords_opt, tiempo, dist, ruta_id, excel_file):
-        """Crear JSON para Telegram/Bot con toda la información"""
+    def _generar_url_google_maps(self, edificios, ruta_id):
+        """Generar URL de Google Maps para la ruta"""
         try:
-            # 🎯 PREPARAR PARADAS CON DATOS COMPLETOS - VERSIÓN CORREGIDA
-            paradas_telegram = []
-
-            for i, grupo in enumerate(filas_opt, 1):
-                primera_persona = grupo['personas'][0]
-                coordenadas = grupo['coordenadas']
-                
-                # 🎯 CORRECCIÓN: La parada DEBE tener nombre y dependencia en el nivel superior
-                parada = {
-                    'orden': i,
-                    'nombre': primera_persona['nombre'],  # 🎯 AGREGAR ESTO
-                    'dependencia': primera_persona['dependencia'],  # 🎯 AGREGAR ESTO
-                    'tipo': 'edificio' if grupo['cantidad_personas'] > 1 else 'individual',
-                    'coords': f"{coordenadas[0]},{coordenadas[1]}",
-                    'direccion': primera_persona['direccion'],
-                    'total_personas': grupo['cantidad_personas'],
-                    'estado': 'pendiente',
-                    'timestamp_entrega': None,
-                    'personas': []
-                }
-                
-                # 🎯 AGREGAR TODAS LAS PERSONAS CON DATOS COMPLETOS
-                for j, persona in enumerate(grupo['personas'], 1):
-                    parada['personas'].append({
-                        'sub_orden': j,
-                        'nombre': persona['nombre'],
-                        'nombre_completo': persona['nombre_completo'],
-                        'dependencia': persona['dependencia'],
-                        'adscripcion': persona['adscripcion'],
-                        'direccion': persona['direccion'],
-                        'alcaldia': persona['alcaldia'],
-                        'foto_acuse': f"fotos_entregas/Ruta_{ruta_id}_Parada_{i}_Persona_{j}.jpg",
-                        'estado': 'pendiente',
-                        'timestamp_entrega': None
-                    })
-                
-                paradas_telegram.append(parada)
-            
-            # 🎯 CREAR URL DE GOOGLE MAPS CON DIRECCIONES
-            google_maps_url = self._generar_url_google_maps(paradas_telegram)
-            
-            # 🎯 ESTRUCTURA COMPLETA PARA EL BOT
-            ruta_telegram = {
-                'ruta_id': ruta_id,
-                'zona': zona,
-                'repartidor_asignado': None,
-                'google_maps_url': google_maps_url,
-                'paradas': paradas_telegram,
-                'estadisticas': {
-                    'total_paradas': len(filas_opt),
-                    'total_personas': sum(g['cantidad_personas'] for g in filas_opt),
-                    'distancia_km': round(dist, 1),
-                    'tiempo_min': round(tiempo),
-                    'origen': self.origen_name,
-                    'configuracion': 'paradas_por_edificio'
-                },
-                'estado': 'pendiente',
-                'fotos_acuses': [],
-                'timestamp_creacion': datetime.now().isoformat(),
-                'excel_original': excel_file,
-                'metadata': {
-                    'columnas_usadas': self.COLUMNAS,
-                    'version': '2.0',
-                    'generador': 'CoreRouteGenerator Reconstruido'
-                }
-            }
-            
-            # Guardar JSON
-            os.makedirs("rutas_telegram", exist_ok=True)
-            telegram_file = f"rutas_telegram/Ruta_{ruta_id}_{zona}.json"
-            
-            with open(telegram_file, 'w', encoding='utf-8') as f:
-                json.dump(ruta_telegram, f, indent=2, ensure_ascii=False)
-            
-            self._log(f"📱 JSON Telegram generado: {telegram_file}")
-            
-            return ruta_telegram, telegram_file
-            
-        except Exception as e:
-            self._log(f"❌ Error creando JSON Telegram: {e}")
-            return None, None
-
-    def _generar_url_google_maps(self, paradas):
-        """Generar URL de Google Maps con todas las paradas"""
-        try:
-            if not paradas or len(paradas) < 2:
+            if len(edificios) < 2:
                 return None
             
-            # Tomar direcciones de las primeras personas de cada parada
+            # Filtrar edificios con dirección válida
             direcciones = []
             
-            for parada in paradas:
-                direccion = parada.get('direccion', '')
+            for edificio in edificios:
+                direccion = edificio.get('direccion_original', '')
                 if direccion and direccion not in ['', 'Sin dirección']:
                     # Agregar Ciudad de México si no está
                     if 'ciudad de méxico' not in direccion.lower() and 'cdmx' not in direccion.lower():
@@ -954,38 +934,109 @@ class CoreRouteGenerator:
             
             url += "&travelmode=driving&dir_action=navigate"
             
-            self._log(f"🗺️ URL Google Maps generada: {url[:80]}...")
+            self._log(f"🗺️ URL Google Maps generada para Ruta {ruta_id}")
             return url
             
         except Exception as e:
             self._log(f"⚠️ Error generando URL Google Maps: {e}")
             return None
 
-    # =========================================================================
-    # MÉTODO PRINCIPAL DE CREACIÓN DE RUTA
-    # =========================================================================
-    
-    def _crear_ruta_archivos(self, zona, indices, ruta_id):
-        """Método principal para crear todos los archivos de una ruta"""
-        self._log(f"🚀 Creando Ruta {ruta_id} - {zona} ({len(indices)} registros)")
+    def _crear_json_telegram(self, zona, edificios_opt, coords_opt, tiempo, dist, ruta_id, excel_file):
+        """Crear JSON para Telegram/Bot"""
+        try:
+            paradas_telegram = []
+
+            for i, edificio in enumerate(edificios_opt, 1):
+                primera_persona = edificio['personas'][0] if edificio['personas'] else {'nombre': 'Sin nombre', 'dependencia': ''}
+                coordenadas = edificio.get('coordenadas', (0, 0))
+                
+                parada = {
+                    'orden': i,
+                    'nombre': f"Edificio {i}",
+                    'dependencia': edificio.get('dependencia_principal', ''),
+                    'direccion': edificio.get('direccion_original', 'Sin dirección'),
+                    'coords': f"{coordenadas[0]},{coordenadas[1]}" if coordenadas else "",
+                    'total_personas': edificio['total_personas'],
+                    'estado': 'pendiente',
+                    'personas': []
+                }
+                
+                for j, persona in enumerate(edificio['personas'], 1):
+                    parada['personas'].append({
+                        'sub_orden': j,
+                        'nombre': persona['nombre'],
+                        'nombre_completo': persona['nombre_completo'],
+                        'dependencia': persona['dependencia'],
+                        'direccion': persona['direccion'],
+                        'alcaldia': persona['alcaldia'],
+                        'foto_acuse': f"fotos_entregas/Ruta_{ruta_id}_Edificio_{i}_Persona_{j}.jpg",
+                        'estado': 'pendiente'
+                    })
+                
+                paradas_telegram.append(parada)
+            
+            # Generar URL de Google Maps
+            google_maps_url = self._generar_url_google_maps(edificios_opt, ruta_id)
+            
+            # Crear estructura completa
+            ruta_telegram = {
+                'ruta_id': ruta_id,
+                'zona': zona,
+                'origen': self.origen_name,
+                'repartidor_asignado': None,
+                'google_maps_url': google_maps_url,
+                'paradas': paradas_telegram,
+                'estadisticas': {
+                    'total_edificios': len(edificios_opt),
+                    'total_personas': sum(e['total_personas'] for e in edificios_opt),
+                    'distancia_km': round(dist, 1),
+                    'tiempo_min': round(tiempo),
+                    'configuracion': 'edificios_agrupados'
+                },
+                'estado': 'pendiente',
+                'timestamp_creacion': datetime.now().isoformat(),
+                'excel_original': excel_file
+            }
+            
+            # Guardar JSON
+            os.makedirs("rutas_telegram", exist_ok=True)
+            telegram_file = f"rutas_telegram/Ruta_{ruta_id}_{zona}.json"
+            
+            with open(telegram_file, 'w', encoding='utf-8') as f:
+                json.dump(ruta_telegram, f, indent=2, ensure_ascii=False)
+            
+            self._log(f"📱 JSON Telegram generado: {telegram_file}")
+            
+            return ruta_telegram, telegram_file
+            
+        except Exception as e:
+            self._log(f"❌ Error creando JSON Telegram: {e}")
+            return None, None
+
+    def _procesar_ruta_individual(self, grupo_ruta, ruta_id):
+        """Procesar una ruta individual"""
+        zona = grupo_ruta['zona']
+        edificios = grupo_ruta['edificios']
+        
+        self._log(f"🚀 Procesando Ruta {ruta_id}: {zona} ({len(edificios)} edificios, {grupo_ruta['total_personas']} personas)")
         
         # Optimizar ruta
-        filas_opt, coords_opt, tiempo, dist, poly = self._optimizar_ruta(indices)
+        edificios_opt, coords_opt, tiempo, dist, poly = self._optimizar_ruta_edificios(edificios)
         
-        if len(filas_opt) == 0:
-            self._log(f"❌ No hay paradas válidas para Ruta {ruta_id}")
+        if len(edificios_opt) == 0:
+            self._log(f"❌ No hay edificios válidos para Ruta {ruta_id}")
             return None
         
-        # 🎯 CREAR ARCHIVOS
-        excel_file = self._crear_excel_ruta(zona, filas_opt, ruta_id)
-        mapa_file = self._crear_mapa_ruta(zona, filas_opt, coords_opt, tiempo, dist, poly, ruta_id)
-        ruta_telegram, telegram_file = self._crear_json_telegram(zona, filas_opt, coords_opt, tiempo, dist, ruta_id, excel_file)
+        # Crear archivos
+        excel_file = self._crear_excel_ruta(zona, edificios_opt, ruta_id)
+        mapa_file = self._crear_mapa_ruta(zona, edificios_opt, coords_opt, tiempo, dist, poly, ruta_id)
+        ruta_telegram, telegram_file = self._crear_json_telegram(zona, edificios_opt, coords_opt, tiempo, dist, ruta_id, excel_file)
         
         if not excel_file or not ruta_telegram:
             self._log(f"❌ Error creando archivos para Ruta {ruta_id}")
             return None
         
-        # 🎯 ENVIAR AL BOT RAILWAY
+        # Enviar al bot Railway
         try:
             RAILWAY_URL = "https://monitoring-routes-pjcdmx-production.up.railway.app"
             conexion = ConexionBotRailway(RAILWAY_URL)
@@ -1001,73 +1052,22 @@ class CoreRouteGenerator:
         except Exception as e:
             self._log(f"⚠️ Error enviando al bot: {e}")
         
-        # 🎯 RESULTADO FINAL
-        total_personas = sum(g['cantidad_personas'] for g in filas_opt)
-        
+        # Resultado final
         resultado = {
             'ruta_id': ruta_id,
             'zona': zona,
-            'paradas': len(filas_opt),  # Número de edificios
-            'personas': total_personas,  # Número total de personas
+            'edificios': len(edificios_opt),
+            'personas': sum(e['total_personas'] for e in edificios_opt),
             'distancia': round(dist, 1),
             'tiempo': round(tiempo),
             'excel': excel_file,
             'mapa': mapa_file if mapa_file else '',
-            'telegram_data': ruta_telegram,
             'telegram_file': telegram_file,
             'google_maps_url': ruta_telegram.get('google_maps_url') if ruta_telegram else None
         }
         
-        self._log(f"✅ Ruta {ruta_id} creada: {len(filas_opt)} paradas, {total_personas} personas")
-        
+        self._log(f"✅ Ruta {ruta_id} creada: {len(edificios_opt)} edificios, {resultado['personas']} personas")
         return resultado
-
-    # =========================================================================
-    # MÉTODOS PARA EVITAR RUTAS DE 1 PERSONA (se mantienen igual)
-    # =========================================================================
-    
-    def _identificar_personas_sueltas(self, subgrupos):
-        """Identificar personas que quedarían solas en rutas"""
-        personas_sueltas = []
-        subgrupos_filtrados = {}
-        
-        for zona, grupos in subgrupos.items():
-            subgrupos_filtrados[zona] = []
-            for grupo in grupos:
-                if len(grupo) == 1:
-                    personas_sueltas.append({
-                        'indice': grupo[0],
-                        'zona': zona,
-                        'datos': self.df.loc[grupo[0]]
-                    })
-                else:
-                    subgrupos_filtrados[zona].append(grupo)
-        
-        self._log(f"👤 Identificadas {len(personas_sueltas)} personas sueltas")
-        return subgrupos_filtrados, personas_sueltas
-
-    def _redistribuir_personas_sueltas(self, subgrupos_filtrados, personas_sueltas):
-        """Redistribuir personas sueltas"""
-        personas_redistribuidas = 0
-        personas_para_rutas_mixtas = []
-        
-        for persona in personas_sueltas:
-            redistribuida = False
-            zona = persona['zona']
-            
-            if zona in subgrupos_filtrados:
-                for grupo in subgrupos_filtrados[zona]:
-                    if len(grupo) < self.max_stops_per_route:
-                        grupo.append(persona['indice'])
-                        redistribuida = True
-                        personas_redistribuidas += 1
-                        break
-            
-            if not redistribuida:
-                personas_para_rutas_mixtas.append(persona)
-        
-        self._log(f"🔄 {personas_redistribuidas} personas redistribuidas")
-        return subgrupos_filtrados, personas_para_rutas_mixtas
 
     # =========================================================================
     # MÉTODO PRINCIPAL DE GENERACIÓN
@@ -1075,107 +1075,47 @@ class CoreRouteGenerator:
     
     def generate_routes(self):
         """🎯 MÉTODO PRINCIPAL - Generar todas las rutas"""
-        self._log("🚀 INICIANDO GENERACIÓN DE RUTAS RECONSTRUIDA")
+        self._log("🚀 INICIANDO GENERACIÓN DE RUTAS POR EDIFICIO")
         self._log(f"📊 Total de registros: {len(self.df)}")
         
         if self.df.empty:
             self._log("❌ No hay datos para procesar")
             return []
         
-        # 🎯 LIMPIAR Y FILTRAR DATOS
-        df_clean = self.df.copy()
+        # 🎯 1. AGRUPAR PERSONAS POR EDIFICIO
+        edificios = self._agrupar_personas_por_edificio()
         
-        # Verificar que las columnas necesarias existan
-        columnas_faltantes = []
-        for col_name in self.COLUMNAS.values():
-            if col_name not in df_clean.columns:
-                columnas_faltantes.append(col_name)
+        if len(edificios) == 0:
+            self._log("❌ No se encontraron edificios válidos")
+            return []
         
-        if columnas_faltantes:
-            self._log(f"⚠️ Columnas faltantes: {columnas_faltantes}")
-            self._log("💡 Buscando columnas similares...")
-            
-            # Intentar encontrar columnas similares
-            for key, expected_col in self.COLUMNAS.items():
-                if expected_col not in df_clean.columns:
-                    for actual_col in df_clean.columns:
-                        if expected_col.lower() in actual_col.lower():
-                            self.COLUMNAS[key] = actual_col
-                            self._log(f"   Usando '{actual_col}' para '{key}'")
-                            break
+        # 🎯 2. ORGANIZAR POR ZONA
+        edificios_por_zona = self._organizar_edificios_por_zona(edificios)
         
-        # 🎯 ASIGNAR ZONAS
-        def extraer_alcaldia(direccion):
-            direccion_str = str(direccion).upper()
-            
-            alcaldias = {
-                'CUAUHTEMOC': ['CUAUHTEMOC', 'DOCTORES', 'CENTRO', 'ROMA', 'CONDESA'],
-                'MIGUEL HIDALGO': ['MIGUEL HIDALGO', 'POLANCO', 'LOMAS', 'CHAPULTEPEC'],
-                'BENITO JUAREZ': ['BENITO JUÁREZ', 'DEL VALLE', 'NÁPOLES'],
-                'ALVARO OBREGON': ['ÁLVARO OBREGÓN', 'SAN ÁNGEL', 'GUADALUPE INN'],
-                'COYOACAN': ['COYOACÁN'],
-                'IZTAPALAPA': ['IZTAPALAPA'],
-                'GUSTAVO A. MADERO': ['GUSTAVO A. MADERO']
-            }
-            
-            for alc, palabras in alcaldias.items():
-                if any(p in direccion_str for p in palabras):
-                    return alc.title()
-            
-            return "OTRAS"
+        # 🎯 3. CREAR GRUPOS DE 6-8 EDIFICIOS POR RUTA
+        grupos_rutas = self._crear_grupos_edificios_por_ruta(edificios_por_zona)
         
-        # Extraer alcaldía de la dirección
-        df_clean['Alcaldia_Extraida'] = df_clean[self.COLUMNAS['DIRECCION']].apply(extraer_alcaldia)
+        if len(grupos_rutas) == 0:
+            self._log("❌ No se pudieron crear grupos de rutas")
+            return []
         
-        # Asignar zona
-        ZONAS = {
-            'CENTRO': ['Cuauhtemoc', 'Miguel Hidalgo'],
-            'SUR': ['Alvaro Obregon', 'Benito Juarez', 'Coyoacan'],
-            'ORIENTE': ['Iztapalapa', 'Gustavo A. Madero'],
-            'OTRAS': ['Otras']
-        }
+        self._log(f"📦 Total rutas a generar: {len(grupos_rutas)}")
         
-        def asignar_zona(alcaldia):
-            alcaldia_str = str(alcaldia).title()
-            for zona_name, alcaldias_in_zone in ZONAS.items():
-                if alcaldia_str in alcaldias_in_zone:
-                    return zona_name
-            return 'OTRAS'
-        
-        df_clean['Zona'] = df_clean['Alcaldia_Extraida'].apply(asignar_zona)
-        
-        # 🎯 CREAR SUBGRUPOS POR ZONA
-        subgrupos = {}
-        for zona in df_clean['Zona'].unique():
-            indices = df_clean[df_clean['Zona'] == zona].index.tolist()
-            # Dividir en grupos del tamaño máximo
-            grupos = [indices[i:i+self.max_stops_per_route] 
-                     for i in range(0, len(indices), self.max_stops_per_route)]
-            subgrupos[zona] = grupos
-            self._log(f"📦 {zona}: {len(indices)} registros → {len(grupos)} grupos")
-        
-        # 🎯 IDENTIFICAR Y REDISTRIBUIR PERSONAS SUELTAS
-        self._log("🔄 Redistribuyendo personas sueltas...")
-        subgrupos_filtrados, personas_sueltas = self._identificar_personas_sueltas(subgrupos)
-        subgrupos_optimizados, personas_mixtas = self._redistribuir_personas_sueltas(subgrupos_filtrados, personas_sueltas)
-        
-        # 🎯 GENERAR RUTAS PRINCIPALES
+        # 🎯 4. GENERAR CADA RUTA
         self.results = []
         ruta_id = 1
         
-        for zona in subgrupos_optimizados.keys():
-            for grupo in subgrupos_optimizados[zona]:
-                if len(grupo) >= 2:  # Mínimo 2 personas por ruta
-                    self._log(f"📋 Procesando Ruta {ruta_id}: {zona} ({len(grupo)} personas)")
-                    try:
-                        resultado = self._crear_ruta_archivos(zona, grupo, ruta_id)
-                        if resultado:
-                            self.results.append(resultado)
-                            ruta_id += 1
-                    except Exception as e:
-                        self._log(f"❌ Error en Ruta {ruta_id}: {e}")
+        for grupo in grupos_rutas:
+            if grupo['total_edificios'] >= 2:  # Mínimo 2 edificios
+                try:
+                    resultado = self._procesar_ruta_individual(grupo, ruta_id)
+                    if resultado:
+                        self.results.append(resultado)
+                        ruta_id += 1
+                except Exception as e:
+                    self._log(f"❌ Error en Ruta {ruta_id}: {e}")
         
-        # 🎯 GUARDAR CACHE
+        # 🎯 5. GUARDAR CACHE
         try:
             with open(self.CACHE_FILE, 'w') as f:
                 json.dump(self.GEOCODE_CACHE, f)
@@ -1183,7 +1123,7 @@ class CoreRouteGenerator:
         except Exception as e:
             self._log(f"⚠️ Error guardando cache: {e}")
         
-        # 🎯 GENERAR RESUMEN
+        # 🎯 6. GENERAR RESUMEN
         if self.results:
             try:
                 resumen_data = []
@@ -1191,12 +1131,11 @@ class CoreRouteGenerator:
                     resumen_data.append({
                         'Ruta_ID': r['ruta_id'],
                         'Zona': r['zona'],
-                        'Paradas': r['paradas'],
+                        'Edificios': r['edificios'],
                         'Personas': r['personas'],
                         'Distancia_km': r['distancia'],
                         'Tiempo_min': r['tiempo'],
                         'Excel': os.path.basename(r['excel']),
-                        'Mapa': os.path.basename(r['mapa']) if r['mapa'] else '',
                         'Google_Maps_URL': r.get('google_maps_url', '')
                     })
                 
@@ -1207,24 +1146,27 @@ class CoreRouteGenerator:
             except Exception as e:
                 self._log(f"⚠️ Error generando resumen: {e}")
         
-        # 🎯 ESTADÍSTICAS FINALES
+        # 🎯 7. ESTADÍSTICAS FINALES
         total_rutas = len(self.results)
-        total_paradas = sum(r['paradas'] for r in self.results) if self.results else 0
+        total_edificios = sum(r['edificios'] for r in self.results) if self.results else 0
         total_personas = sum(r['personas'] for r in self.results) if self.results else 0
         
         self._log("🎉 GENERACIÓN DE RUTAS COMPLETADA")
         self._log(f"📊 RESUMEN FINAL:")
         self._log(f"   • Total rutas generadas: {total_rutas}")
-        self._log(f"   • Total paradas (edificios): {total_paradas}")
+        self._log(f"   • Total edificios: {total_edificios}")
         self._log(f"   • Total personas: {total_personas}")
-        self._log(f"   • Personas por ruta promedio: {total_personas/total_rutas:.1f}" if total_rutas > 0 else "0")
         
-        # Verificar rutas de 1 persona
-        rutas_una_persona = [r for r in self.results if r['personas'] == 1]
-        if rutas_una_persona:
-            self._log(f"⚠️ ADVERTENCIA: {len(rutas_una_persona)} rutas con solo 1 persona")
+        if total_rutas > 0:
+            self._log(f"   • Edificios por ruta promedio: {total_edificios/total_rutas:.1f}")
+            self._log(f"   • Personas por ruta promedio: {total_personas/total_rutas:.1f}")
+        
+        # Verificar tamaño de rutas
+        rutas_pequenas = [r for r in self.results if r['edificios'] < 6]
+        if rutas_pequenas:
+            self._log(f"⚠️ ADVERTENCIA: {len(rutas_pequenas)} rutas con menos de 6 edificios")
         else:
-            self._log("✅ EXCELENTE: ¡Cero rutas con 1 persona!")
+            self._log("✅ EXCELENTE: Todas las rutas tienen 6+ edificios!")
         
         return self.results
         
