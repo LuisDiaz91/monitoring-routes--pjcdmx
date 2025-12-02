@@ -839,43 +839,43 @@ class CoreRouteGenerator:
     def _crear_json_telegram(self, zona, filas_opt, coords_opt, tiempo, dist, ruta_id, excel_file):
         """Crear JSON para Telegram/Bot con toda la información"""
         try:
-         # 🎯 PREPARAR PARADAS CON DATOS COMPLETOS - VERSIÓN CORREGIDA
-paradas_telegram = []
+            # 🎯 PREPARAR PARADAS CON DATOS COMPLETOS - VERSIÓN CORREGIDA
+            paradas_telegram = []
 
-for i, grupo in enumerate(filas_opt, 1):
-    primera_persona = grupo['personas'][0]
-    coordenadas = grupo['coordenadas']
-    
-    # 🎯 CORRECCIÓN: La parada DEBE tener nombre y dependencia en el nivel superior
-    parada = {
-        'orden': i,
-        'nombre': primera_persona['nombre'],  # 🎯 AGREGAR ESTO
-        'dependencia': primera_persona['dependencia'],  # 🎯 AGREGAR ESTO
-        'tipo': 'edificio' if grupo['cantidad_personas'] > 1 else 'individual',
-        'coords': f"{coordenadas[0]},{coordenadas[1]}",
-        'direccion': primera_persona['direccion'],
-        'total_personas': grupo['cantidad_personas'],
-        'estado': 'pendiente',
-        'timestamp_entrega': None,
-        'personas': []
-    }
-    
-    # 🎯 AGREGAR TODAS LAS PERSONAS CON DATOS COMPLETOS
-    for j, persona in enumerate(grupo['personas'], 1):
-        parada['personas'].append({
-            'sub_orden': j,
-            'nombre': persona['nombre'],
-            'nombre_completo': persona['nombre_completo'],
-            'dependencia': persona['dependencia'],
-            'adscripcion': persona['adscripcion'],
-            'direccion': persona['direccion'],
-            'alcaldia': persona['alcaldia'],
-            'foto_acuse': f"fotos_entregas/Ruta_{ruta_id}_Parada_{i}_Persona_{j}.jpg",
-            'estado': 'pendiente',
-            'timestamp_entrega': None
-        })
-    
-    paradas_telegram.append(parada)
+            for i, grupo in enumerate(filas_opt, 1):
+                primera_persona = grupo['personas'][0]
+                coordenadas = grupo['coordenadas']
+                
+                # 🎯 CORRECCIÓN: La parada DEBE tener nombre y dependencia en el nivel superior
+                parada = {
+                    'orden': i,
+                    'nombre': primera_persona['nombre'],  # 🎯 AGREGAR ESTO
+                    'dependencia': primera_persona['dependencia'],  # 🎯 AGREGAR ESTO
+                    'tipo': 'edificio' if grupo['cantidad_personas'] > 1 else 'individual',
+                    'coords': f"{coordenadas[0]},{coordenadas[1]}",
+                    'direccion': primera_persona['direccion'],
+                    'total_personas': grupo['cantidad_personas'],
+                    'estado': 'pendiente',
+                    'timestamp_entrega': None,
+                    'personas': []
+                }
+                
+                # 🎯 AGREGAR TODAS LAS PERSONAS CON DATOS COMPLETOS
+                for j, persona in enumerate(grupo['personas'], 1):
+                    parada['personas'].append({
+                        'sub_orden': j,
+                        'nombre': persona['nombre'],
+                        'nombre_completo': persona['nombre_completo'],
+                        'dependencia': persona['dependencia'],
+                        'adscripcion': persona['adscripcion'],
+                        'direccion': persona['direccion'],
+                        'alcaldia': persona['alcaldia'],
+                        'foto_acuse': f"fotos_entregas/Ruta_{ruta_id}_Parada_{i}_Persona_{j}.jpg",
+                        'estado': 'pendiente',
+                        'timestamp_entrega': None
+                    })
+                
+                paradas_telegram.append(parada)
             
             # 🎯 CREAR URL DE GOOGLE MAPS CON DIRECCIONES
             google_maps_url = self._generar_url_google_maps(paradas_telegram)
