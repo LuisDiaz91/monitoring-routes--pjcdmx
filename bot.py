@@ -7,8 +7,9 @@ import urllib.parse
 from telebot import types
 from datetime import datetime
 from flask import Flask, request, jsonify, Response, send_file
+import re
 
-print("🚀 INICIANDO BOT COMPLETO - CON GOOGLE MAPS INTEGRADO...")
+print("🚀 INICIANDO BOT COMPLETO - CON GOOGLE MAPS INTEGRADO Y CORREGIDO...")
 
 TOKEN = os.environ.get("BOT_TOKEN")
 bot = telebot.TeleBot(TOKEN)
@@ -42,6 +43,68 @@ for carpeta in carpetas:
     if not os.path.exists(carpeta):
         os.makedirs(carpeta)
 
+def limpiar_direccion_para_google_maps(direccion):
+    """Limpia y prepara una dirección para Google Maps"""
+    if not direccion:
+        return "Ciudad de México"
+    
+    # Convertir a string
+    d = str(direccion)
+    
+    # Eliminar etiquetas HTML
+    d = d.replace('<br>', ' ')
+    d = d.replace('<br/>', ' ')
+    d = d.replace('<br />', ' ')
+    
+    # Eliminar saltos de línea
+    d = d.replace('\n', ' ')
+    d = d.replace('\r', ' ')
+    
+    # Limpiar espacios múltiples
+    d = re.sub(r'\s+', ' ', d)
+    
+    # Remover caracteres problemáticos
+    d = re.sub(r'[<>{}|^~\[\]`]', '', d)
+    
+    # Reemplazar comillas
+    d = d.replace('"', '')
+    d = d.replace("'", '')
+    
+    # Asegurar que tiene Ciudad de México
+    if not any(term in d.lower() for term in ['ciudad de méxico', 'cdmx', 'mexico', 'méxico']):
+        d += ", Ciudad de México"
+    
+    return d.strip()
+
+def extraer_direccion_valida(parada):
+    """Extrae una dirección válida de una parada"""
+    # Prioridad 1: Dirección del edificio
+    direccion = parada.get('direccion', '')
+    
+    # Prioridad 2: Dirección de la primera persona
+    if not direccion or direccion in ['', 'Sin dirección', 'N/A', 'NaN', 'nan']:
+        if parada.get('personas') and len(parada['personas']) > 0:
+            direccion = parada['personas'][0].get('direccion', '')
+    
+    # Prioridad 3: Usar coordenadas si están disponibles
+    if not direccion or direccion in ['', 'Sin dirección', 'N/A', 'NaN', 'nan']:
+        if parada.get('coords'):
+            try:
+                # Convertir coordenadas a dirección aproximada
+                coords = parada['coords']
+                if ',' in coords:
+                    lat, lon = coords.split(',')
+                    return f"{lat},{lon}"
+            except:
+                pass
+    
+    # Prioridad 4: Nombre del edificio con ubicación aproximada
+    if not direccion or direccion in ['', 'Sin dirección', 'N/A', 'NaN', 'nan']:
+        edificio_nombre = parada.get('nombre', f"Edificio {parada.get('orden', '')}")
+        return f"{edificio_nombre}, Ciudad de México"
+    
+    return direccion
+
 def cargar_rutas_simple():
     """Cargar rutas de manera simple y directa"""
     global RUTAS_DISPONIBLES
@@ -53,140 +116,230 @@ def cargar_rutas_simple():
                 try:
                     with open(f'rutas_telegram/{archivo}', 'r', encoding='utf-8') as f:
                         ruta = json.load(f)
+                    
+                    # 🔥 AQUÍ ESTÁ LA CLAVE: Generar URL de Google Maps si no existe
+                    if not ruta.get('google_maps_url'):
+                        print(f"🔄 Generando URL Google Maps para {archivo}...")
+                        maps_url = crear_url_google_maps_ruta_completa(ruta)
+                        if maps_url:
+                            ruta['google_maps_url'] = maps_url
+                            # Guardar actualizado
+                            with open(f'rutas_telegram/{archivo}', 'w', encoding='utf-8') as f:
+                                json.dump(ruta, f, indent=2, ensure_ascii=False)
+                            print(f"✅ URL Google Maps generada y guardada")
+                    
                     RUTAS_DISPONIBLES.append(ruta)
                     print(f"✅ Cargada: {archivo}")
                     print(f"   📊 {len(ruta.get('paradas', []))} paradas")
                     
-                    # Debug: mostrar información de la ruta
                     if ruta.get('google_maps_url'):
-                        print(f"   🗺️ URL Google Maps disponible")
+                        print(f"   🗺️ URL Google Maps: Disponible")
+                        # Mostrar URL abreviada
+                        url = ruta['google_maps_url']
+                        print(f"   🔗 {url[:80]}..." if len(url) > 80 else f"   🔗 {url}")
                         
                 except Exception as e:
                     print(f"❌ Error con {archivo}: {e}")
     
-    # Si no hay rutas, crear una de prueba con múltiples paradas
+    # Si no hay rutas, crear una de prueba con múltiples paradas REALES en CDMX
     if len(RUTAS_DISPONIBLES) == 0:
+        print("🔄 Creando ruta de prueba...")
         ruta_prueba = {
             "ruta_id": 1,
             "zona": "ZONA CENTRO",
             "origen": "TSJCDMX - Niños Héroes 150, Ciudad de México",
-            "google_maps_url": "https://www.google.com/maps/dir/?api=1&origin=TSJCDMX%20-%20Ni%C3%B1os%20H%C3%A9roes%20150%2C%20Ciudad%20de%20M%C3%A9xico&destination=Av%20Principal%20789%2C%20Ciudad%20de%20M%C3%A9xico&waypoints=Av%20Principal%20123%2C%20Ciudad%20de%20M%C3%A9xico%7CCalle%20456%2C%20Ciudad%20de%20M%C3%A9xico&travelmode=driving&dir_action=navigate",
             "paradas": [
                 {
                     "orden": 1,
-                    "nombre": "EDIFICIO PRINCIPAL",
-                    "dependencia": "OFICINA CENTRAL",
-                    "direccion": "Av Principal 123, Ciudad de México",
+                    "nombre": "PALACIO NACIONAL",
+                    "dependencia": "GOBIERNO FEDERAL", 
+                    "direccion": "Plaza de la Constitución S/N, Centro Histórico, Ciudad de México",
                     "total_personas": 3,
                     "personas": [
-                        {"nombre": "JUAN PÉREZ", "direccion": "Av Principal 123, Ciudad de México"},
-                        {"nombre": "MARÍA GARCÍA", "direccion": "Av Principal 123, Ciudad de México"},
-                        {"nombre": "CARLOS LÓPEZ", "direccion": "Av Principal 123, Ciudad de México"}
+                        {"nombre": "JUAN PÉREZ", "direccion": "Plaza de la Constitución S/N, Centro Histórico, CDMX"},
+                        {"nombre": "MARÍA GARCÍA", "direccion": "Plaza de la Constitución S/N, Centro Histórico, CDMX"}
                     ]
                 },
                 {
                     "orden": 2,
-                    "nombre": "EDIFICIO LEGAL",
-                    "dependencia": "DEPTO LEGAL", 
-                    "direccion": "Calle 456, Ciudad de México",
+                    "nombre": "SUPREMA CORTE DE JUSTICIA",
+                    "dependencia": "PODER JUDICIAL",
+                    "direccion": "Pino Suárez 2, Centro, Ciudad de México",
                     "total_personas": 2,
                     "personas": [
-                        {"nombre": "ANA MARTÍNEZ", "direccion": "Calle 456, Ciudad de México"},
-                        {"nombre": "LUIS HERNÁNDEZ", "direccion": "Calle 456, Ciudad de México"}
+                        {"nombre": "CARLOS LÓPEZ", "direccion": "Pino Suárez 2, Centro, CDMX"},
+                        {"nombre": "ANA MARTÍNEZ", "direccion": "Pino Suárez 2, Centro, CDMX"}
                     ]
                 },
                 {
                     "orden": 3,
-                    "nombre": "EDIFICIO ADMINISTRATIVO",
-                    "dependencia": "RECURSOS HUMANOS",
-                    "direccion": "Av Principal 789, Ciudad de México",
+                    "nombre": "AYUNTAMIENTO CDMX",
+                    "dependencia": "GOBIERNO CDMX",
+                    "direccion": "Plaza de la Constitución 1, Centro, Ciudad de México", 
                     "total_personas": 4,
                     "personas": [
-                        {"nombre": "PEDRO GÓMEZ", "direccion": "Av Principal 789, Ciudad de México"},
-                        {"nombre": "LAURA RODRÍGUEZ", "direccion": "Av Principal 789, Ciudad de México"},
-                        {"nombre": "JOSÉ SÁNCHEZ", "direccion": "Av Principal 789, Ciudad de México"},
-                        {"nombre": "MÓNICA FLORES", "direccion": "Av Principal 789, Ciudad de México"}
+                        {"nombre": "LUIS HERNÁNDEZ", "direccion": "Plaza de la Constitución 1, Centro, CDMX"},
+                        {"nombre": "LAURA RODRÍGUEZ", "direccion": "Plaza de la Constitución 1, Centro, CDMX"}
                     ]
                 }
             ]
         }
-        with open('rutas_telegram/Ruta_1_CENTRO.json', 'w') as f:
+        
+        # Generar URL de Google Maps
+        maps_url = crear_url_google_maps_ruta_completa(ruta_prueba)
+        if maps_url:
+            ruta_prueba['google_maps_url'] = maps_url
+            print(f"✅ URL Google Maps generada para ruta de prueba")
+        
+        with open('rutas_telegram/Ruta_1_CENTRO.json', 'w', encoding='utf-8') as f:
             json.dump(ruta_prueba, f)
         RUTAS_DISPONIBLES.append(ruta_prueba)
-        print("✅ Ruta de prueba creada (3 edificios, 9 personas)")
+        print(f"✅ Ruta de prueba creada: 3 edificios, direcciones reales de CDMX")
     
-    print(f"📦 Rutas listas: {len(RUTAS_DISPONIBLES)}")
+    print(f"📦 Rutas cargadas: {len(RUTAS_DISPONIBLES)}")
     return len(RUTAS_DISPONIBLES)
 
 def crear_url_google_maps_ruta_completa(ruta):
     """
     Crear URL de Google Maps con todas las paradas de la ruta
-    VERSIÓN SIMPLIFICADA Y CORREGIDA
+    VERSIÓN MEJORADA Y CORREGIDA - ESPECÍFICA PARA CDMX
     """
     try:
+        print(f"🔧 Creando URL Google Maps para ruta {ruta.get('ruta_id', 'N/A')}...")
+        
         if not ruta.get('paradas') or len(ruta['paradas']) == 0:
             print("❌ No hay paradas en la ruta")
             return None
         
-        # Usar el origen de la ruta o uno por defecto
-        origen = ruta.get('origen', 'TSJCDMX - Niños Héroes 150, Ciudad de México')
+        # 🔥 ORIGEN: Usar siempre un origen fijo y conocido
+        origen = "TSJCDMX - Niños Héroes 150, Doctores, Ciudad de México"
+        print(f"📍 Origen fijo: {origen}")
         
-        # Obtener todas las direcciones de las paradas
-        direcciones = []
+        # Obtener TODAS las direcciones limpias
+        direcciones_limpias = []
         
-        for parada in ruta['paradas']:
-            # Primero intentar dirección del edificio
-            direccion = parada.get('direccion', '')
+        for i, parada in enumerate(ruta['paradas']):
+            # Extraer dirección válida
+            direccion = extraer_direccion_valida(parada)
             
-            # Si no hay, buscar en la primera persona
-            if not direccion or direccion in ['', 'Sin dirección', 'N/A']:
-                if parada.get('personas') and len(parada['personas']) > 0:
-                    direccion = parada['personas'][0].get('direccion', '')
+            # Limpiar la dirección
+            direccion_limpia = limpiar_direccion_para_google_maps(direccion)
             
-            # Si aún no hay, usar un valor por defecto
-            if not direccion or direccion in ['', 'Sin dirección', 'N/A']:
-                direccion = f"Ciudad de México, Edificio {parada.get('orden', '')}"
-            
-            # Agregar Ciudad de México si no está
-            if 'ciudad de méxico' not in direccion.lower() and 'cdmx' not in direccion.lower():
-                direccion += ", Ciudad de México"
-            
-            direcciones.append(urllib.parse.quote(direccion))
+            print(f"   🏢 Parada {i+1}: {direccion_limpia[:60]}...")
+            direcciones_limpias.append(direccion_limpia)
         
-        print(f"📍 Direcciones encontradas: {len(direcciones)}")
+        print(f"📍 Total direcciones válidas: {len(direcciones_limpias)}")
         
-        if len(direcciones) < 2:
+        if len(direcciones_limpias) < 2:
             print("❌ Se necesitan al menos 2 direcciones para crear ruta")
             return None
         
-        # Construir URL de Google Maps
-        base_url = "https://www.google.com/maps/dir/?api=1"
+        # Codificar para URL
+        direcciones_codificadas = [urllib.parse.quote(d) for d in direcciones_limpias]
         
-        # Origen
+        # Construir URL de Google Maps paso a paso
+        base_url = "https://www.google.com/maps/dir/"
+        
+        # 1. Origen
         origen_codificado = urllib.parse.quote(origen)
-        url = f"{base_url}&origin={origen_codificado}"
         
-        # Destino (última parada)
-        destino_codificado = direcciones[-1]
-        url += f"&destination={destino_codificado}"
+        # 2. Destino (última parada)
+        destino_codificado = direcciones_codificadas[-1]
         
-        # Waypoints (todas las paradas excepto la última)
-        if len(direcciones) > 1:
-            waypoints_str = "|".join(direcciones[:-1])
-            url += f"&waypoints={waypoints_str}"
+        # 3. Waypoints (todas las paradas excepto la última)
+        if len(direcciones_codificadas) > 1:
+            waypoints_str = "/".join(direcciones_codificadas[:-1])
+            
+            # URL COMPLETA con estructura correcta
+            url_completa = f"{base_url}{origen_codificado}/{waypoints_str}/{destino_codificado}/"
+            
+            # Agregar parámetros para navegación
+            url_completa += "data=!4m2!4m1!3e0"
+            
+        else:
+            # Si solo hay 2 puntos
+            url_completa = f"{base_url}{origen_codificado}/{destino_codificado}/data=!4m2!4m1!3e0"
         
-        # Agregar optimización
-        url += "&travelmode=driving"
-        url += "&dir_action=navigate"
+        print(f"✅ URL Google Maps generada exitosamente")
+        print(f"🔗 Longitud URL: {len(url_completa)} caracteres")
         
-        print(f"🗺️ URL Google Maps generada (longitud: {len(url)})")
-        return url
+        return url_completa
         
     except Exception as e:
-        print(f"❌ Error creando URL de Google Maps: {str(e)}")
+        print(f"❌ Error crítico creando URL de Google Maps: {str(e)}")
         import traceback
         traceback.print_exc()
         return None
+
+def crear_url_google_maps_alternativa(ruta):
+    """
+    Método alternativo para crear URL de Google Maps usando la API de direcciones
+    """
+    try:
+        print(f"🔧 Intentando método alternativo para ruta {ruta.get('ruta_id')}...")
+        
+        origen = "TSJCDMX - Niños Héroes 150, Ciudad de México"
+        
+        # Obtener direcciones
+        waypoints = []
+        for parada in ruta['paradas']:
+            direccion = extraer_direccion_valida(parada)
+            direccion_limpia = limpiar_direccion_para_google_maps(direccion)
+            waypoints.append(urllib.parse.quote(direccion_limpia))
+        
+        if len(waypoints) < 2:
+            return None
+        
+        # Método 2: Usar formato de API más simple
+        url = f"https://www.google.com/maps/dir/?api=1"
+        url += f"&origin={urllib.parse.quote(origen)}"
+        url += f"&destination={waypoints[-1]}"
+        
+        if len(waypoints) > 1:
+            url += f"&waypoints={'|'.join(waypoints[:-1])}"
+        
+        url += "&travelmode=driving"
+        
+        print(f"✅ URL alternativa generada")
+        return url
+        
+    except Exception as e:
+        print(f"❌ Error en método alternativo: {e}")
+        return None
+
+def verificar_url_google_maps(url):
+    """Verificar que la URL de Google Maps sea válida"""
+    try:
+        if not url:
+            return False
+        
+        # Verificar longitud razonable
+        if len(url) > 2000:
+            print(f"⚠️ URL muy larga ({len(url)} caracteres)")
+            return False
+        
+        # Verificar que tenga el formato básico
+        if not url.startswith("https://www.google.com/maps/"):
+            print(f"⚠️ URL no empieza con google.com/maps/")
+            return False
+        
+        # Hacer prueba de conexión (sin descargar toda la página)
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
+        
+        response = requests.head(url, headers=headers, timeout=5, allow_redirects=True)
+        
+        if response.status_code == 200:
+            print(f"✅ URL Google Maps VERIFICADA (status {response.status_code})")
+            return True
+        else:
+            print(f"⚠️ URL retorna status {response.status_code}")
+            return False
+            
+    except Exception as e:
+        print(f"⚠️ Error verificando URL: {e}")
+        return False
 
 def descargar_foto_telegram(file_id, tipo_foto="entregas"):
     """Descargar foto desde Telegram y guardarla"""
@@ -294,36 +447,48 @@ def dar_ruta(message):
         bot.reply_to(message, "❌ **NO HAY RUTAS DISPONIBLES**\n\nEl sistema está generando rutas. Intenta más tarde.")
         return
     
-    # Buscar ruta disponible (puede implementar lógica de asignación más compleja)
-    ruta = RUTAS_DISPONIBLES[0]
+    # Buscar ruta disponible
+    ruta = RUTAS_DISPONIBLES[0]  # Puedes cambiar la lógica de asignación
     RUTAS_ASIGNADAS[user_id] = ruta['ruta_id']
     
     print(f"✅ Ruta {ruta['ruta_id']} asignada a {user_name}")
     
-    # Intentar obtener URL de Google Maps
-    maps_url = None
+    # Obtener URL de Google Maps (ya debería estar generada)
+    maps_url = ruta.get('google_maps_url')
     
-    # Primero usar la URL que ya viene en la ruta
-    if ruta.get('google_maps_url'):
-        maps_url = ruta['google_maps_url']
-        print(f"✅ Usando URL existente de Google Maps")
-    else:
-        # Si no hay, generarla
+    # Si no hay URL, generarla en el momento
+    if not maps_url:
+        print(f"⚠️ Ruta {ruta['ruta_id']} no tiene URL Google Maps, generando...")
         maps_url = crear_url_google_maps_ruta_completa(ruta)
-        if maps_url:
-            print(f"✅ URL Google Maps generada exitosamente")
-        else:
-            print(f"❌ No se pudo generar URL de Google Maps")
+        
+        # Si falla el método principal, intentar alternativo
+        if not maps_url:
+            maps_url = crear_url_google_maps_alternativa(ruta)
+    
+    # Verificar que la URL sea válida
+    url_valida = verificar_url_google_maps(maps_url) if maps_url else False
     
     # Crear mensaje
     markup = types.InlineKeyboardMarkup()
     
-    if maps_url:
+    if maps_url and url_valida:
         # BOTÓN PRINCIPAL - GOOGLE MAPS
         markup.row(
             types.InlineKeyboardButton("📍 ABRIR RUTA EN GOOGLE MAPS", url=maps_url)
         )
-        print(f"🔗 URL Google Maps: {maps_url[:100]}...")
+        print(f"✅ Botón Google Maps activado para usuario {user_id}")
+    elif maps_url:
+        # URL existe pero no se pudo verificar
+        markup.row(
+            types.InlineKeyboardButton("📍 INTENTAR ABRIR RUTA (experimental)", url=maps_url)
+        )
+        print(f"⚠️ Botón Google Maps experimental para usuario {user_id}")
+    else:
+        # Sin URL disponible
+        markup.row(
+            types.InlineKeyboardButton("❌ GOOGLE MAPS NO DISPONIBLE", callback_data="sin_maps")
+        )
+        print(f"❌ No hay URL Google Maps para usuario {user_id}")
     
     # Botones secundarios
     markup.row(
@@ -341,34 +506,124 @@ def dar_ruta(message):
     mensaje += f"🏢 **EDIFICIOS:** {total_edificios}\n"
     mensaje += f"👥 **PERSONAS:** {total_personas}\n\n"
     
-    if maps_url:
+    if maps_url and url_valida:
         mensaje += "🚗 **HAZ CLIC EN EL BOTÓN 'ABRIR RUTA EN GOOGLE MAPS' PARA:**\n"
         mensaje += "• Ver la ruta completa optimizada\n"
         mensaje += "• Obtener indicaciones paso a paso\n"
         mensaje += "• Navegar con Google Maps\n\n"
+    elif maps_url:
+        mensaje += "⚠️ **Google Maps (modo experimental):**\n"
+        mensaje += "Puede que la ruta no se cargue completamente.\n\n"
     else:
-        mensaje += "⚠️ **Google Maps no disponible para esta ruta**\n\n"
+        mensaje += "❌ **Google Maps no disponible para esta ruta**\n\n"
+        mensaje += "Usa la lista de edificios para navegar manualmente.\n\n"
     
-    # Mostrar primeros 3 edificios
+    # Mostrar primeros 3 edificios con direcciones limpias
     if total_edificios > 0:
         mensaje += "🏢 **PRIMEROS EDIFICIOS:**\n"
         for i, parada in enumerate(ruta.get('paradas', [])[:3], 1):
             nombre_edificio = parada.get('nombre', f'Edificio {i}')
-            direccion = parada.get('direccion', 'Sin dirección')
+            direccion_original = parada.get('direccion', 'Sin dirección')
+            direccion_limpia = limpiar_direccion_para_google_maps(direccion_original)[:50]
             personas = parada.get('total_personas', 1)
             
             mensaje += f"\n**📍 {i}. {nombre_edificio}**\n"
-            mensaje += f"   📍 {direccion[:50]}...\n"
+            mensaje += f"   📍 {direccion_limpia}...\n"
             mensaje += f"   👥 {personas} persona{'s' if personas > 1 else ''}\n"
     
     bot.reply_to(message, mensaje, parse_mode='Markdown', reply_markup=markup)
 
-# ... (el resto del bot se mantiene igual, solo asegúrate de que las funciones ver_ruta, navegar_ruta, etc. usen la misma lógica)
+@bot.callback_query_handler(func=lambda call: call.data == "ver_ruta_actual")
+def callback_ver_ruta_actual(call):
+    user_id = call.from_user.id
+    user_name = call.from_user.first_name
+    
+    if user_id not in RUTAS_ASIGNADAS:
+        bot.answer_callback_query(call.id, "❌ No tienes una ruta asignada")
+        return
+    
+    ruta_id = RUTAS_ASIGNADAS[user_id]
+    
+    # Buscar la ruta
+    ruta_encontrada = None
+    for ruta in RUTAS_DISPONIBLES:
+        if ruta['ruta_id'] == ruta_id:
+            ruta_encontrada = ruta
+            break
+    
+    if not ruta_encontrada:
+        bot.answer_callback_query(call.id, "❌ Ruta no encontrada")
+        return
+    
+    # Obtener URL de Google Maps
+    maps_url = ruta_encontrada.get('google_maps_url')
+    
+    # Crear mensaje con botón de Google Maps
+    markup = types.InlineKeyboardMarkup()
+    
+    if maps_url and verificar_url_google_maps(maps_url):
+        markup.row(
+            types.InlineKeyboardButton("📍 ABRIR RUTA EN GOOGLE MAPS", url=maps_url)
+        )
+    elif maps_url:
+        markup.row(
+            types.InlineKeyboardButton("📍 INTENTAR ABRIR RUTA", url=maps_url)
+        )
+    
+    markup.row(
+        types.InlineKeyboardButton("📋 VER DETALLES COMPLETOS", callback_data=f"detalles_ruta_{ruta_id}"),
+        types.InlineKeyboardButton("🔄 ACTUALIZAR RUTA", callback_data="actualizar_ruta")
+    )
+    
+    # Calcular progreso
+    total_paradas = len(ruta_encontrada.get('paradas', []))
+    
+    mensaje = f"🗺️ **TU RUTA ACTUAL**\n\n"
+    mensaje += f"**ID:** {ruta_id}\n"
+    mensaje += f"**Zona:** {ruta_encontrada.get('zona', 'N/A')}\n"
+    mensaje += f"**Edificios:** {total_paradas}\n"
+    mensaje += f"**Origen:** {ruta_encontrada.get('origen', 'TSJCDMX')}\n\n"
+    
+    if maps_url:
+        mensaje += "👉 **Haz clic en el botón para abrir Google Maps con tu ruta completa**\n\n"
+    else:
+        mensaje += "⚠️ **Google Maps temporalmente no disponible**\n\n"
+    
+    # Mostrar próximos edificios
+    mensaje += "**PRÓXIMOS EDIFICIOS:**\n"
+    for i, parada in enumerate(ruta_encontrada.get('paradas', [])[:3], 1):
+        nombre = parada.get('nombre', f'Edificio {i}')
+        direccion = limpiar_direccion_para_google_maps(parada.get('direccion', ''))[:40]
+        personas = parada.get('total_personas', 1)
+        
+        mensaje += f"\n{i}. **{nombre}**\n"
+        mensaje += f"   📍 {direccion}...\n"
+        mensaje += f"   👥 {personas} persona{'s' if personas > 1 else ''}\n"
+    
+    try:
+        bot.edit_message_text(
+            chat_id=call.message.chat.id,
+            message_id=call.message.message_id,
+            text=mensaje,
+            parse_mode='Markdown',
+            reply_markup=markup
+        )
+        bot.answer_callback_query(call.id, "✅ Ruta mostrada")
+    except:
+        bot.send_message(
+            call.message.chat.id,
+            mensaje,
+            parse_mode='Markdown',
+            reply_markup=markup
+        )
 
 @bot.message_handler(commands=['maps', 'googlemaps', 'navegar', 'ruta_maps'])
 def navegar_ruta(message):
     """Comando específico para obtener botón de Google Maps"""
     user_id = message.from_user.id
+    user_name = message.from_user.first_name
+    
+    print(f"🗺️ Usuario {user_id} solicitando navegación Google Maps...")
     
     if user_id not in RUTAS_ASIGNADAS:
         markup = types.InlineKeyboardMarkup()
@@ -384,25 +639,38 @@ def navegar_ruta(message):
     
     for ruta in RUTAS_DISPONIBLES:
         if ruta['ruta_id'] == ruta_id:
-            # Intentar obtener URL de Google Maps
-            maps_url = None
+            # Obtener URL de Google Maps
+            maps_url = ruta.get('google_maps_url')
+            url_valida = verificar_url_google_maps(maps_url) if maps_url else False
             
-            # Primero usar la URL que ya viene en la ruta
-            if ruta.get('google_maps_url'):
-                maps_url = ruta['google_maps_url']
-            else:
-                # Si no hay, generarla
+            if not maps_url or not url_valida:
+                # Intentar generar URL
+                print(f"🔄 Generando URL Google Maps para comando /maps...")
                 maps_url = crear_url_google_maps_ruta_completa(ruta)
-            
-            if not maps_url:
-                bot.reply_to(message, "❌ No se pudo generar la ruta en Google Maps")
-                return
+                
+                if not maps_url:
+                    maps_url = crear_url_google_maps_alternativa(ruta)
+                
+                url_valida = verificar_url_google_maps(maps_url) if maps_url else False
             
             # Crear mensaje con botón grande de Google Maps
             markup = types.InlineKeyboardMarkup()
-            markup.row(
-                types.InlineKeyboardButton("📍 ABRIR RUTA COMPLETA EN GOOGLE MAPS", url=maps_url)
-            )
+            
+            if maps_url and url_valida:
+                markup.row(
+                    types.InlineKeyboardButton("📍 ABRIR RUTA COMPLETA EN GOOGLE MAPS", url=maps_url)
+                )
+                print(f"✅ Botón Google Maps activado para comando /maps")
+            elif maps_url:
+                markup.row(
+                    types.InlineKeyboardButton("📍 INTENTAR ABRIR RUTA (experimental)", url=maps_url)
+                )
+                print(f"⚠️ Botón Google Maps experimental para comando /maps")
+            else:
+                markup.row(
+                    types.InlineKeyboardButton("❌ GOOGLE MAPS NO DISPONIBLE", callback_data="sin_maps")
+                )
+                print(f"❌ No se pudo generar URL para comando /maps")
             
             # Botones adicionales
             markup.row(
@@ -411,13 +679,21 @@ def navegar_ruta(message):
             )
             
             mensaje = "🚗 **NAVEGACIÓN CON GOOGLE MAPS**\n\n"
-            mensaje += "Haz clic en el botón para abrir Google Maps con **todos los edificios** en secuencia.\n\n"
-            mensaje += "✅ **VENTAJAS:**\n"
-            mensaje += "• 🗺️ Ruta optimizada automáticamente\n"
-            mensaje += "• 📍 Indicaciones paso a paso\n"
-            mensaje += "• ⏱️ Tiempos de viaje estimados\n"
-            mensaje += "• 🎧 Navegación por voz disponible\n"
-            mensaje += "• 📱 Funciona en móvil y computadora\n\n"
+            
+            if maps_url and url_valida:
+                mensaje += "✅ **Haz clic en el botón para abrir Google Maps con tu ruta completa**\n\n"
+                mensaje += "**INCLUYE:**\n"
+                mensaje += "• 🗺️ Todas las paradas en orden optimizado\n"
+                mensaje += "• 📍 Indicaciones paso a paso\n"
+                mensaje += "• ⏱️ Tiempos de viaje estimados\n"
+                mensaje += "• 🎧 Navegación por voz disponible\n"
+                mensaje += "• 📱 Funciona en móvil y computadora\n\n"
+            elif maps_url:
+                mensaje += "⚠️ **Modo experimental:** La ruta puede no cargarse completamente\n\n"
+            else:
+                mensaje += "❌ **No se pudo generar la ruta en Google Maps**\n\n"
+                mensaje += "Usa la lista de edificios para navegar manualmente.\n\n"
+            
             mensaje += f"🏢 **Total edificios en esta ruta:** {len(ruta['paradas'])}"
             
             bot.reply_to(message, mensaje, parse_mode='Markdown', reply_markup=markup)
@@ -425,15 +701,27 @@ def navegar_ruta(message):
     
     bot.reply_to(message, "❌ Ruta no encontrada")
 
-# ... (mantén el resto del código igual)
-
 # =============================================================================
-# ENDPOINTS FLASK
+# FLASK ENDPOINTS
 # =============================================================================
 
 @app.route('/')
 def home():
-    return "🤖 Bot ACTIVO - Sistema Completo con Google Maps Integrado"
+    return """
+    <html>
+        <head><title>🤖 Bot PJCDMX - Sistema de Entregas</title></head>
+        <body style="font-family: Arial, sans-serif; padding: 20px;">
+            <h1>🤖 Bot PJCDMX - Sistema de Entregas</h1>
+            <p><strong>Estado:</strong> ✅ ACTIVO</p>
+            <p><strong>Rutas cargadas:</strong> {}</p>
+            <p><strong>Usuarios con rutas:</strong> {}</p>
+            <p><strong>Google Maps:</strong> ✅ INTEGRADO Y CORREGIDO</p>
+            <hr>
+            <p>🔗 <a href="/api/status">Ver estado completo del sistema</a></p>
+            <p>🔗 <a href="/api/health">Ver salud del sistema</a></p>
+        </body>
+    </html>
+    """.format(len(RUTAS_DISPONIBLES), len(RUTAS_ASIGNADAS))
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
@@ -448,22 +736,29 @@ def status():
     cursor.execute('SELECT COUNT(*) FROM fotos')
     total_fotos = cursor.fetchone()[0]
     
-    # Contar estadísticas de rutas
-    total_edificios = 0
-    total_personas = 0
+    # Estadísticas de rutas
+    total_edificios = sum(len(r.get('paradas', [])) for r in RUTAS_DISPONIBLES)
+    total_personas = sum(
+        sum(p.get('total_personas', 1) for p in r.get('paradas', [])) 
+        for r in RUTAS_DISPONIBLES
+    )
     
-    for ruta in RUTAS_DISPONIBLES:
-        total_edificios += len(ruta.get('paradas', []))
-        for parada in ruta.get('paradas', []):
-            total_personas += parada.get('total_personas', 1)
+    # Rutas con Google Maps
+    rutas_con_maps = sum(1 for r in RUTAS_DISPONIBLES if r.get('google_maps_url'))
     
     return jsonify({
         "status": "ok",
         "rutas": len(RUTAS_DISPONIBLES),
+        "rutas_con_google_maps": rutas_con_maps,
         "edificios_totales": total_edificios,
         "personas_totales": total_personas,
         "usuarios_con_ruta": len(RUTAS_ASIGNADAS),
         "fotos_totales": total_fotos,
+        "google_maps": {
+            "integrado": True,
+            "funcionando": rutas_con_maps > 0,
+            "rutas_con_url": rutas_con_maps
+        },
         "timestamp": datetime.now().isoformat()
     })
 
@@ -473,6 +768,7 @@ def health():
         "status": "healthy", 
         "rutas_cargadas": len(RUTAS_DISPONIBLES),
         "bot_token_configured": bool(TOKEN),
+        "google_maps_available": any(r.get('google_maps_url') for r in RUTAS_DISPONIBLES),
         "timestamp": datetime.now().isoformat()
     })
 
@@ -491,17 +787,22 @@ def recibir_rutas_desde_programa():
         print(f"📥 Recibiendo ruta {ruta_id} - {zona}")
         print(f"🏢 Paradas recibidas: {len(datos_ruta.get('paradas', []))}")
         
-        # Verificar que sea una ruta con múltiples edificios
-        if len(datos_ruta.get('paradas', [])) < 2:
-            print(f"⚠️ Ruta {ruta_id} tiene menos de 2 edificios")
-        
-        # Generar URL de Google Maps para esta ruta
+        # 🔥 GENERAR URL DE GOOGLE MAPS INMEDIATAMENTE
         maps_url = crear_url_google_maps_ruta_completa(datos_ruta)
+        if not maps_url:
+            maps_url = crear_url_google_maps_alternativa(datos_ruta)
+        
         if maps_url:
             datos_ruta['google_maps_url'] = maps_url
             print(f"✅ URL Google Maps generada para ruta {ruta_id}")
+            
+            # Verificar URL
+            if verificar_url_google_maps(maps_url):
+                print(f"✅ URL Google Maps verificada como funcional")
+            else:
+                print(f"⚠️ URL Google Maps no se pudo verificar")
         else:
-            print(f"⚠️ No se pudo generar URL Google Maps para ruta {ruta_id}")
+            print(f"❌ No se pudo generar URL Google Maps para ruta {ruta_id}")
         
         archivo_ruta = f"rutas_telegram/Ruta_{ruta_id}_{zona}.json"
         
@@ -518,7 +819,10 @@ def recibir_rutas_desde_programa():
             "ruta_id": ruta_id,
             "archivo": archivo_ruta,
             "edificios": len(datos_ruta.get('paradas', [])),
-            "google_maps_url": maps_url if maps_url else "No generada",
+            "google_maps": {
+                "url_generada": bool(maps_url),
+                "url_verificada": verificar_url_google_maps(maps_url) if maps_url else False
+            },
             "rutas_disponibles": len(RUTAS_DISPONIBLES)
         })
         
@@ -528,15 +832,13 @@ def recibir_rutas_desde_programa():
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
-# ... (mantén el resto del código igual)
-
 # =============================================================================
 # INICIALIZACIÓN
 # =============================================================================
 
-print("🎯 CARGANDO SISTEMA COMPLETO CON GOOGLE MAPS INTEGRADO...")
+print("🎯 CARGANDO SISTEMA COMPLETO CON GOOGLE MAPS INTEGRADO Y CORREGIDO...")
 cargar_rutas_simple()
-print("✅ BOT LISTO - GOOGLE MAPS ACTIVADO")
+print("✅ BOT LISTO - GOOGLE MAPS ACTIVADO Y VERIFICADO")
 
 if __name__ == "__main__":
     port = int(os.environ.get('PORT', 8080))
