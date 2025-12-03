@@ -319,7 +319,7 @@ class GestorTelegram:
             return False
 
 # =============================================================================
-# CLASE PRINCIPAL - MOTOR DE RUTAS (CoreRouteGenerator) - RECONSTRUIDA
+# CLASE PRINCIPAL - MOTOR DE RUTAS (CoreRouteGenerator) - RECONSTRUIDA Y CORREGIDA
 # =============================================================================
 class CoreRouteGenerator:
     def __init__(self, df, api_key, origen_coords, origen_name, max_stops_per_route=8):
@@ -438,7 +438,7 @@ class CoreRouteGenerator:
             }
 
     # =========================================================================
-    # MÉTODOS DE GEOCODIFICACIÓN
+    # MÉTODOS DE GEOCODIFICACIÓN - COMPLETOS Y CORREGIDOS
     # =========================================================================
     
     def _geocode(self, direccion):
@@ -480,129 +480,245 @@ class CoreRouteGenerator:
             self._log(f"❌ Error en geocode: {e}")
             return None
 
+    def _geocode_cdmx_inteligente(self, direccion, alcaldia):
+        """Geocoding especializado para direcciones de CDMX"""
+        if not direccion:
+            return None
+        
+        # PRIMERO: Intentar con dirección completa
+        coords = self._geocode(direccion)
+        if coords:
+            return coords
+        
+        # SEGUNDO: Si tiene alcaldía, agregarla
+        if alcaldia and alcaldia not in ['', 'nan']:
+            direccion_con_alcaldia = f"{direccion}, Alcaldía {alcaldia}, Ciudad de México"
+            coords = self._geocode(direccion_con_alcaldia)
+            if coords:
+                return coords
+        
+        # TERCERO: Buscar dirección sin número específico
+        direccion_sin_numero = self._extraer_calle_principal(direccion)
+        if direccion_sin_numero and direccion_sin_numero != direccion:
+            coords = self._geocode(f"{direccion_sin_numero}, Ciudad de México")
+            if coords:
+                self._log(f"📍 Coordenadas aproximadas para: {direccion[:50]}...")
+                return coords
+        
+        # CUARTO: Intentar solo con colonia si se puede extraer
+        colonia = self._extraer_colonia(direccion)
+        if colonia and alcaldia:
+            coords = self._geocode(f"{colonia}, {alcaldia}, Ciudad de México")
+            if coords:
+                self._log(f"📍 Coordenadas por colonia para: {direccion[:50]}...")
+                return coords
+        
+        return None
+
+    def _extraer_calle_principal(self, direccion):
+        """Extrae solo el nombre de la calle principal"""
+        if not direccion:
+            return ""
+        
+        d = str(direccion)
+        
+        # Eliminar números y lo que venga después
+        d = re.sub(r'#\s*\d+.*$', '', d)
+        d = re.sub(r'No\.?\s*\d+.*$', '', d)
+        d = re.sub(r'Núm\.?\s*\d+.*$', '', d)
+        d = re.sub(r'\b\d+\s*[-A-Za-z].*$', '', d)  # Número seguido de letras
+        
+        # Eliminar referencias a pisos, interiores, etc.
+        d = re.sub(r'\bPiso\s*\d+.*$', '', d, flags=re.IGNORECASE)
+        d = re.sub(r'\bInt\.?\s*\w+.*$', '', d, flags=re.IGNORECASE)
+        d = re.sub(r'\bLocal\s*\w+.*$', '', d, flags=re.IGNORECASE)
+        
+        return d.strip()
+
+    def _extraer_colonia(self, direccion):
+        """Intenta extraer el nombre de la colonia de la dirección"""
+        if not direccion:
+            return None
+        
+        d = str(direccion).upper()
+        
+        # Buscar patrones como "Col. [Nombre]" o "Colonia [Nombre]"
+        match = re.search(r'COL\.?\s+([A-ZÁÉÍÓÚÑ\s]+?)(?:,|\.|$)', d)
+        if match:
+            return match.group(1).strip()
+        
+        return None
+
+    def _es_geocoding_exacto(self, direccion):
+        """Determina si el geocoding fue exacto basado en la dirección"""
+        # Verificar si la dirección tiene número específico
+        if re.search(r'#\s*\d+|No\.?\s*\d+', direccion):
+            return True
+        return False
+
+    # =========================================================================
+    # MÉTODOS DE NORMALIZACIÓN DE DIRECCIONES
+    # =========================================================================
+    
     def _normalizar_direccion(self, direccion):
-        """Normalizar direcciones para agrupamiento inteligente"""
+        """Normalizar direcciones - VERSIÓN MEJORADA PARA CDMX"""
         if not direccion or pd.isna(direccion):
             return ""
-            
-        direccion_str = str(direccion).lower().strip()
         
-        # Remover caracteres especiales
-        direccion_str = re.sub(r'[^\w\s]', ' ', direccion_str)
-        direccion_str = re.sub(r'\s+', ' ', direccion_str)
+        # Convertir a string y limpiar
+        d = str(direccion).strip()
         
-        # Normalizar abreviaturas comunes
+        # Eliminar códigos postales y referencias innecesarias
+        d = re.sub(r'C\.P\.?\s*\d{5}', '', d)  # C.P. 06720
+        d = re.sub(r'C\.?P\.?\s*\d{5}', '', d)  # CP 06720
+        d = re.sub(r'CÓDIGO POSTAL\s*\d{5}', '', d)  # Código Postal 06720
+        
+        # Eliminar "Ciudad de México" y variantes
+        d = re.sub(r'Ciudad de México', '', d, flags=re.IGNORECASE)
+        d = re.sub(r'CDMX', '', d, flags=re.IGNORECASE)
+        d = re.sub(r'Ciudad de Méx\.?', '', d, flags=re.IGNORECASE)
+        d = re.sub(r'\.\s*$', '', d)  # Eliminar punto final
+        
+        # Normalizar puntos cardinales COMPLETAMENTE
+        d = re.sub(r'\bS\.?\b', 'Sur', d, flags=re.IGNORECASE)
+        d = re.sub(r'\bN\.?\b', 'Norte', d, flags=re.IGNORECASE)
+        d = re.sub(r'\bE\.?\b', 'Oriente', d, flags=re.IGNORECASE)
+        d = re.sub(r'\bO\.?\b', 'Poniente', d, flags=re.IGNORECASE)
+        
+        # Normalizar "No.", "Núm.", "#", etc.
+        d = re.sub(r'(No\.?\s*|Núm\.?\s*|Número\s*|#\s*)(\d+)', r'#\2', d, flags=re.IGNORECASE)
+        
+        # Normalizar abreviaturas comunes en CDMX
         normalizaciones = {
-            r'\bav\b': 'avenida',
-            r'\bav\.': 'avenida',
-            r'\bcto\b': 'circuito',
-            r'\bblvd\b': 'boulevard',
-            r'\bcd\b': 'ciudad',
-            r'\bcol\b': 'colonia',
-            r'\bdeleg\b': 'delegacion',
-            r'\bc\.p\.': 'codigo postal',
-            r'\bcp\b': 'codigo postal',
-            r'\bedif\b': 'edificio',
-            r'\besq\b': 'esquina',
-            r'\bint\b': 'interior',
-            r'\bno\b': 'numero',
-            r'\bnum\b': 'numero',
-            r'\bprlv\b': 'privada',
-            r'\bs/n\b': 'sin numero',
-            r'\bsn\b': 'sin numero',
-            r'\bpiso\b': '',
-            r'\bp\.iso\b': ''
+            r'\bAv\.?\b': 'Avenida',
+            r'\bAvda\.?\b': 'Avenida',
+            r'\bBlvd\.?\b': 'Boulevard',
+            r'\bC\.?\b': 'Calle',
+            r'\bCol\.?\b': 'Colonia',
+            r'\bDel\.?\b': 'Delegación',
+            r'\bAlc\.?\b': 'Alcaldía',
+            r'\bEdif\.?\b': 'Edificio',
+            r'\bP\.?\s*iso\b': 'Piso',
+            r'\bEsq\.?\b': 'Esquina',
+            r'\bInt\.?\b': 'Interior',
+            r'\bPriv\.?\b': 'Privada',
+            r'\bS\/?N\b': 'S/N',
+            r'\bCto\.?\b': 'Circuito',
+            r'\bPte\.?\b': 'Poniente',
         }
         
         for patron, reemplazo in normalizaciones.items():
-            direccion_str = re.sub(patron, reemplazo, direccion_str)
+            d = re.sub(patron, reemplazo, d, flags=re.IGNORECASE)
         
-        # Remover palabras que no ayudan en agrupamiento
-        palabras_innecesarias = [
-            'ciudad de mexico', 'mexico', 'cdmx', 'alcaldia', 
-            'delegacion', 'codigo postal', 'cp'
-        ]
+        # Limpiar espacios múltiples y trim
+        d = re.sub(r'\s+', ' ', d).strip()
         
-        for palabra in palabras_innecesarias:
-            direccion_str = direccion_str.replace(palabra, '')
+        # 🔥 CRÍTICO: Extraer el número principal para agrupamiento inteligente
+        # Buscar patrones como "Avenida Insurgentes Sur #881" → "Avenida Insurgentes Sur"
+        match = re.search(r'(.+?)(?:#\s*(\d+)|No\.?\s*(\d+)|Núm\.?\s*(\d+)|\s+(\d+)\b)', d)
         
-        return direccion_str.strip()
-
-    def _calcular_distancia(self, coord1, coord2):
-        """Calcular distancia en kilómetros entre dos coordenadas"""
-        try:
-            lat1, lon1 = coord1
-            lat2, lon2 = coord2
+        if match:
+            # Extraer calle sin número específico
+            calle_base = match.group(1).strip()
+            numero = match.group(2) or match.group(3) or match.group(4) or match.group(5)
             
-            # Fórmula Haversine
-            R = 6371  # Radio de la Tierra en km
-            dlat = math.radians(lat2 - lat1)
-            dlon = math.radians(lon2 - lon1)
-            a = (math.sin(dlat/2) * math.sin(dlat/2) + 
-                 math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * 
-                 math.sin(dlon/2) * math.sin(dlon/2))
-            c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
-            return R * c
-        except:
-            return 9999
+            if numero:
+                # Agrupar por manzana (primeros dígitos)
+                # Ej: 881 → 800, 1234 → 1200, 56 → 00
+                if len(numero) >= 3:
+                    grupo_numero = numero[:-2] + "00"
+                elif len(numero) == 2:
+                    grupo_numero = numero[0] + "0"
+                else:
+                    grupo_numero = "00"
+                
+                return f"{calle_base} #{grupo_numero}"
+        
+        return d
 
     # =========================================================================
-    # MÉTODOS DE AGRUPAMIENTO POR EDIFICIO
+    # MÉTODOS DE AGRUPAMIENTO POR EDIFICIO - ÚNICA VERSIÓN CORRECTA
     # =========================================================================
     
     def _agrupar_personas_por_edificio(self):
-        """Agrupar todas las personas por edificio/dirección"""
-        self._log("🏢 Iniciando agrupamiento por edificio...")
+        """Agrupar todas las personas por edificio/dirección - VERSIÓN MEJORADA"""
+        self._log("🏢 Iniciando agrupamiento por edificio para CDMX...")
         
         edificios = {}
+        estadisticas = {
+            'total': 0,
+            'con_direccion': 0,
+            'sin_direccion': 0,
+            'geocoding_exacto': 0,
+            'geocoding_aproximado': 0,
+            'sin_coordenadas': 0
+        }
         
         for idx, fila in self.df.iterrows():
             datos_persona = self._extraer_datos_persona(fila)
             direccion = datos_persona['direccion']
+            alcaldia = datos_persona['alcaldia']
+            
+            estadisticas['total'] += 1
             
             if not direccion or direccion in ['', 'Sin dirección', 'nan']:
-                self._log(f"⚠️ Fila {idx}: Sin dirección válida")
+                estadisticas['sin_direccion'] += 1
                 continue
             
-            # Normalizar dirección para agrupar
+            estadisticas['con_direccion'] += 1
+            
+            # 🔥 USAR geocoding inteligente para CDMX
+            coords = self._geocode_cdmx_inteligente(direccion, alcaldia)
+            
+            # Normalizar dirección para agrupamiento inteligente
             direccion_normalizada = self._normalizar_direccion(direccion)
             
             if not direccion_normalizada:
                 continue
             
-            # Crear clave única para el edificio
-            clave_edificio = f"{direccion_normalizada}_{datos_persona['alcaldia']}"
+            # Crear clave única para el edificio (usando dirección normalizada y alcaldía)
+            clave_edificio = f"{direccion_normalizada}_{alcaldia}"
             
             if clave_edificio not in edificios:
                 edificios[clave_edificio] = {
                     'direccion_original': direccion,
                     'direccion_normalizada': direccion_normalizada,
-                    'alcaldia': datos_persona['alcaldia'],
+                    'alcaldia': alcaldia,
                     'dependencia_principal': datos_persona['dependencia'],
                     'personas': [],
-                    'coordenadas': None,
-                    'total_personas': 0
+                    'coordenadas': coords,
+                    'total_personas': 0,
+                    'geocoding_preciso': coords is not None
                 }
             
             edificios[clave_edificio]['personas'].append(datos_persona)
             edificios[clave_edificio]['total_personas'] += 1
-        
-        self._log(f"📍 Total edificios únicos encontrados: {len(edificios)}")
-        
-        # Obtener coordenadas para cada edificio
-        self._log("🗺️ Obteniendo coordenadas para edificios...")
-        edificios_con_coords = {}
-        
-        for clave, edificio in edificios.items():
-            coords = self._geocode(edificio['direccion_original'])
+            
             if coords:
-                edificio['coordenadas'] = coords
-                edificios_con_coords[clave] = edificio
+                # Verificar si fue geocoding exacto o aproximado
+                if self._es_geocoding_exacto(direccion):
+                    estadisticas['geocoding_exacto'] += 1
+                else:
+                    estadisticas['geocoding_aproximado'] += 1
             else:
-                self._log(f"⚠️ No se pudieron obtener coordenadas para: {edificio['direccion_original'][:50]}...")
+                estadisticas['sin_coordenadas'] += 1
         
-        self._log(f"✅ Edificios con coordenadas válidas: {len(edificios_con_coords)}/{len(edificios)}")
-        return edificios_con_coords
+        # Estadísticas detalladas
+        self._log("📊 ESTADÍSTICAS DE AGRUPAMIENTO:")
+        self._log(f"   • Total personas procesadas: {estadisticas['total']}")
+        self._log(f"   • Con dirección válida: {estadisticas['con_direccion']}")
+        self._log(f"   • Sin dirección: {estadisticas['sin_direccion']}")
+        self._log(f"   • Con coordenadas exactas: {estadisticas['geocoding_exacto']}")
+        self._log(f"   • Con coordenadas aproximadas: {estadisticas['geocoding_aproximado']}")
+        self._log(f"   • Sin coordenadas: {estadisticas['sin_coordenadas']}")
+        self._log(f"   • Total edificios únicos: {len(edificios)}")
+        
+        # Advertencia si hay muchos sin coordenadas
+        sin_coords_pct = (estadisticas['sin_coordenadas'] / estadisticas['con_direccion']) * 100
+        if sin_coords_pct > 20:
+            self._log(f"⚠️ ADVERTENCIA: {sin_coords_pct:.1f}% sin coordenadas")
+        
+        return edificios
 
     def _asignar_zona_a_edificio(self, alcaldia):
         """Asignar zona basada en la alcaldía"""
@@ -700,6 +816,24 @@ class CoreRouteGenerator:
             todas_las_rutas.extend(grupos)
         
         return todas_las_rutas
+
+    def _calcular_distancia(self, coord1, coord2):
+        """Calcular distancia en kilómetros entre dos coordenadas"""
+        try:
+            lat1, lon1 = coord1
+            lat2, lon2 = coord2
+            
+            # Fórmula Haversine
+            R = 6371  # Radio de la Tierra en km
+            dlat = math.radians(lat2 - lat1)
+            dlon = math.radians(lon2 - lon1)
+            a = (math.sin(dlat/2) * math.sin(dlat/2) + 
+                 math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * 
+                 math.sin(dlon/2) * math.sin(dlon/2))
+            c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
+            return R * c
+        except:
+            return 9999
 
     def _optimizar_ruta_edificios(self, edificios):
         """Optimizar ruta para un grupo de edificios"""
@@ -1169,9 +1303,9 @@ class CoreRouteGenerator:
             self._log("✅ EXCELENTE: Todas las rutas tienen 6+ edificios!")
         
         return self.results
-        
+
 # =============================================================================
-# CLASE INTERFAZ GRÁFICA (SistemaRutasGUI) - VERSIÓN FINAL
+# CLASE INTERFAZ GRÁFICA (SistemaRutasGUI) - VERSIÓN FINAL CORREGIDA
 # =============================================================================
 class SistemaRutasGUI:
     def __init__(self, root):
@@ -1311,6 +1445,10 @@ class SistemaRutasGUI:
         self.log_text = scrolledtext.ScrolledText(log_frame, height=20, wrap=tk.WORD)
         self.log_text.pack(fill=tk.BOTH, expand=True)
 
+    # =========================================================================
+    # MÉTODOS DE CARGA DE EXCEL - CORREGIDOS
+    # =========================================================================
+    
     def cargar_excel_desde_github(self):
         """Cargar automáticamente el Excel de GitHub y configurar API"""
         try:
@@ -1354,6 +1492,189 @@ class SistemaRutasGUI:
         except Exception as e:
             self.log(f"❌ ERROR en carga automática: {str(e)}")
 
+    def cargar_excel(self):
+        archivo = filedialog.askopenfilename(
+            title="Seleccionar archivo Excel", 
+            filetypes=[("Excel files", "*.xlsx")]
+        )
+        if archivo:
+            try:
+                self.log("🔄 Cargando Excel...")
+                
+                # Leer todas las filas manteniendo saltos de línea
+                df_completo = pd.read_excel(
+                    archivo, 
+                    header=None,  # Leer sin encabezado para detectar correctamente
+                    dtype=str  # Todo como texto para mantener formato
+                )
+                
+                self.archivo_excel = archivo
+                nombre_archivo = os.path.basename(archivo)
+                self.file_label.config(text=nombre_archivo, foreground='green')
+                self.log(f"✅ Excel cargado: {nombre_archivo}")
+                self.log(f"📊 Forma original: {df_completo.shape}")
+                
+                # 🔥 NUEVO: Procesamiento especial para Excel con secciones
+                df_procesado = self._procesar_excel_complejo(df_completo)
+                
+                if df_procesado is not None and len(df_procesado) > 0:
+                    self.df = df_procesado
+                    self.log(f"✅ Excel procesado: {len(df_procesado)} registros válidos")
+                    
+                    # Detección de columnas en el dataframe procesado
+                    columna_direccion = self._detectar_columna_direccion(df_procesado)
+                    columna_nombre = self._detectar_columna_nombre(df_procesado) 
+                    columna_adscripcion = self._detectar_columna_adscripcion(df_procesado)
+                    columna_alcaldia = self._detectar_columna_alcaldia(df_procesado)
+                    
+                    self.columnas_seleccionadas = {
+                        'direccion': columna_direccion,
+                        'nombre': columna_nombre,
+                        'adscripcion': columna_adscripcion,
+                        'alcaldia': columna_alcaldia
+                    }
+                    
+                    self.log(f"🎯 Columnas detectadas:")
+                    self.log(f"   • Nombre: {columna_nombre}")
+                    self.log(f"   • Dirección: {columna_direccion}")
+                    self.log(f"   • Adscripción: {columna_adscripcion}")
+                    self.log(f"   • Alcaldía: {columna_alcaldia}")
+                    
+                    # Mostrar vista previa
+                    self._mostrar_vista_previa(df_procesado)
+                    
+                    self.btn_generar.config(state='normal')
+                    self.log("🎉 ¡Excel listo para generar rutas!")
+                else:
+                    self.log("❌ No se pudieron extraer datos válidos del Excel")
+                    
+            except Exception as e:
+                self.log(f"❌ ERROR: {str(e)}")
+                import traceback
+                self.log(traceback.format_exc())
+                messagebox.showerror("Error", f"No se pudo cargar el Excel:\n{str(e)}")
+
+    def _procesar_excel_complejo(self, df_raw):
+        """Procesa Excel complejo como el ejemplo (con secciones y celdas combinadas)"""
+        try:
+            self.log("🔍 Procesando estructura compleja del Excel...")
+            
+            # 1. Encontrar filas con encabezados de columnas
+            filas_encabezados = []
+            for idx, fila in df_raw.iterrows():
+                # Buscar filas que tengan "NOMBRE" en alguna celda
+                for celda in fila:
+                    if isinstance(celda, str) and "NOMBRE" in celda.upper():
+                        filas_encabezados.append(idx)
+                        break
+            
+            self.log(f"📋 Se encontraron {len(filas_encabezados)} secciones en el Excel")
+            
+            # 2. Procesar cada sección
+            todos_datos = []
+            
+            for i, idx_encabezado in enumerate(filas_encabezados):
+                self.log(f"   📄 Procesando sección {i+1}...")
+                
+                # Tomar filas después del encabezado hasta encontrar el siguiente encabezado o fila vacía
+                inicio = idx_encabezado + 1
+                if i + 1 < len(filas_encabezados):
+                    fin = filas_encabezados[i + 1]
+                else:
+                    fin = len(df_raw)
+                
+                # Extraer datos de esta sección
+                datos_seccion = self._extraer_datos_seccion(df_raw, inicio, fin)
+                todos_datos.extend(datos_seccion)
+            
+            # 3. Crear DataFrame final
+            if todos_datos:
+                df_final = pd.DataFrame(todos_datos)
+                self.log(f"✅ Total registros extraídos: {len(df_final)}")
+                return df_final
+            else:
+                self.log("⚠️ No se extrajeron datos válidos")
+                return None
+                
+        except Exception as e:
+            self.log(f"❌ Error procesando Excel complejo: {str(e)}")
+            return None
+
+    def _extraer_datos_seccion(self, df_raw, inicio, fin):
+        """Extrae datos de una sección específica del Excel"""
+        datos = []
+        
+        for idx in range(inicio, fin):
+            fila = df_raw.iloc[idx]
+            
+            # Saltar filas vacías o que contengan títulos de sección
+            if fila.isnull().all() or self._es_fila_titulo(fila):
+                continue
+            
+            # Convertir fila a dict considerando la estructura del ejemplo
+            # En el ejemplo: #, NOMBRE, ADSCRIPCIÓN, DIRECCIÓN, ALCALDÍA, ACUSE
+            dato = {
+                'NUMERO': self._limpiar_valor(fila.iloc[1]) if len(fila) > 1 else '',
+                'NOMBRE': self._limpiar_valor(fila.iloc[2]) if len(fila) > 2 else '',
+                'ADSCRIPCION': self._limpiar_valor(fila.iloc[3]) if len(fila) > 3 else '',
+                'DIRECCION': self._limpiar_valor(fila.iloc[4]) if len(fila) > 4 else '',
+                'ALCALDIA': self._limpiar_valor(fila.iloc[5]) if len(fila) > 5 else '',
+                'ACUSE': self._limpiar_valor(fila.iloc[6]) if len(fila) > 6 else ''
+            }
+            
+            # Filtrar filas sin nombre o dirección
+            if dato['NOMBRE'] and dato['NOMBRE'] not in ['', 'nan', 'NaN']:
+                # Procesar dirección con saltos de línea
+                if dato['DIRECCION']:
+                    dato['DIRECCION'] = self._procesar_direccion_multilinea(dato['DIRECCION'])
+                
+                datos.append(dato)
+        
+        return datos
+
+    def _procesar_direccion_multilinea(self, direccion):
+        """Procesa direcciones con saltos de línea o tags HTML <br>"""
+        if not direccion or pd.isna(direccion):
+            return ""
+        
+        # Convertir a string
+        dir_str = str(direccion)
+        
+        # Reemplazar tags HTML <br> por espacios
+        dir_str = dir_str.replace('<br>', ' ')
+        dir_str = dir_str.replace('<br/>', ' ')
+        dir_str = dir_str.replace('<br />', ' ')
+        
+        # Reemplar saltos de línea reales
+        dir_str = dir_str.replace('\n', ' ')
+        dir_str = dir_str.replace('\r', ' ')
+        
+        # Limpiar espacios múltiples
+        dir_str = re.sub(r'\s+', ' ', dir_str).strip()
+        
+        return dir_str
+
+    def _es_fila_titulo(self, fila):
+        """Determina si una fila es un título de sección"""
+        for celda in fila:
+            if isinstance(celda, str):
+                celda_upper = celda.upper()
+                # Buscar palabras que indiquen títulos de sección
+                if any(palabra in celda_upper for palabra in [
+                    'GOBIERNO FEDERAL', 'ALCALDÍAS', 'SUPREMA CORTE',
+                    'CDMX', 'CONGRESO', 'UNIVERSIDADES', 'COLEGIOS',
+                    'CÁMARA DE DIPUTADOS', 'FAMILIA', 'SINDICATOS',
+                    'SENADO', 'FISCALÍA', 'ESPECIALES'
+                ]):
+                    return True
+        return False
+
+    def _limpiar_valor(self, valor):
+        """Limpia un valor del Excel"""
+        if pd.isna(valor) or valor is None:
+            return ""
+        return str(valor).strip()
+
     def _detectar_columna_direccion(self, df):
         for col in df.columns:
             # Buscar DIRECCIÓN con o sin tilde
@@ -1373,47 +1694,27 @@ class SistemaRutasGUI:
                 return col
         return None
 
+    def _detectar_columna_alcaldia(self, df):
+        """Detectar columna de alcaldía"""
+        for col in df.columns:
+            col_str = str(col).upper()
+            if any(palabra in col_str for palabra in ['ALCALDÍA', 'ALCALDIA', 'MUNICIPIO', 'DELEGACIÓN']):
+                return col
+        return None
+
+    def _mostrar_vista_previa(self, df, n=10):
+        """Muestra vista previa de los datos"""
+        self.log("👁️ VISTA PREVIA de datos cargados:")
+        for i, (_, fila) in enumerate(df.head(n).iterrows()):
+            nombre = fila.get(self.columnas_seleccionadas.get('nombre', ''), 'Sin nombre')[:30]
+            direccion = fila.get(self.columnas_seleccionadas.get('direccion', ''), 'Sin dirección')[:50]
+            self.log(f"   {i+1}. {nombre}... → {direccion}...")
+
     def log(self, mensaje):
         timestamp = datetime.now().strftime("%H:%M:%S")
         self.log_text.insert(tk.END, f"[{timestamp}] {mensaje}\n")
         self.log_text.see(tk.END)
         self.root.update()
-
-    def cargar_excel(self):
-        archivo = filedialog.askopenfilename(
-            title="Seleccionar archivo Excel", 
-            filetypes=[("Excel files", "*.xlsx")]
-        )
-        if archivo:
-            try:
-                self.log("🔄 Cargando Excel...")
-                df_completo = pd.read_excel(archivo)
-                self.archivo_excel = archivo
-                
-                nombre_archivo = os.path.basename(archivo)
-                self.file_label.config(text=nombre_archivo, foreground='green')
-                self.log(f"✅ Excel cargado: {nombre_archivo}")
-                self.log(f"📊 Registros totales: {len(df_completo)}")
-                
-                self.df = df_completo
-                
-                # Detección de columnas
-                col_direccion = self._detectar_columna_direccion(df_completo)
-                col_nombre = self._detectar_columna_nombre(df_completo) 
-                col_adscripcion = self._detectar_columna_adscripcion(df_completo)
-                
-                self.columnas_seleccionadas = {
-                    'direccion': col_direccion,
-                    'nombre': col_nombre,
-                    'adscripcion': col_adscripcion
-                }
-                
-                self.btn_generar.config(state='normal')
-                self.log("🎉 ¡Excel listo para generar rutas!")
-                
-            except Exception as e:
-                self.log(f"❌ ERROR: {str(e)}")
-                messagebox.showerror("Error", f"No se pudo cargar el Excel:\n{str(e)}")
 
     def configurar_api(self):
         self.api_key = self.api_entry.get().strip()
