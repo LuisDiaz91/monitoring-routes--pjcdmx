@@ -1675,13 +1675,33 @@ class SistemaRutasGUI:
             return ""
         return str(valor).strip()
 
-    def _detectar_columna_direccion(self, df):
-        for col in df.columns:
-            # Buscar DIRECCIÓN con o sin tilde
-            if any(p in str(col).lower() for p in ['dirección', 'direccion', 'dir', 'address', 'ubicación']):
-                return col
-        return df.columns[0] if len(df.columns) > 0 else None
-
+def _detectar_columna_direccion(self, df):
+    """Detección más robusta de columnas de dirección"""
+    columnas_posibles = []
+    
+    for col in df.columns:
+        col_str = str(col).lower()
+        # Buscar coincidencias más amplias
+        if any(p in col_str for p in ['dirección', 'direccion', 'dir', 'address', 
+                                     'ubicación', 'ubicacion', 'domicilio', 'calle', 'direc']):
+            return col
+        
+        # Si no encuentra exacto, guardar para fallback
+        if 'dir' in col_str:
+            columnas_posibles.append(col)
+    
+    # Si hay opciones, usar la primera
+    if columnas_posibles:
+        return columnas_posibles[0]
+    
+    # Último recurso: usar la primera columna que no sea nombre
+    for col in df.columns:
+        col_str = str(col).lower()
+        if 'nombre' not in col_str and 'name' not in col_str:
+            return col
+    
+    return df.columns[0] if len(df.columns) > 0 else None
+    
     def _detectar_columna_nombre(self, df):
         for col in df.columns:
             if any(p in str(col).lower() for p in ['nombre', 'name', 'nombre completo']):
@@ -1745,72 +1765,173 @@ class SistemaRutasGUI:
         thread.daemon = True
         thread.start()
 
-    def _procesar_rutas(self):
-        try:
-            self.log("🚀 INICIANDO GENERACIÓN DE RUTAS CON PARADAS POR EDIFICIO...")
+def _procesar_rutas(self):
+    try:
+        self.log("🚀 INICIANDO GENERACIÓN DE RUTAS CON PARADAS POR EDIFICIO...")
+        
+        # Limpiar carpetas
+        self._limpiar_carpetas_anteriores()
+        
+        # Cargar datos
+        df_completo = pd.read_excel(self.archivo_excel)
+        self.log(f"📊 Total de registros: {len(df_completo)}")
+        self.log(f"📋 Columnas disponibles: {list(df_completo.columns)}")
+        
+        # Mostrar las primeras filas para depuración
+        self.log("👁️ Vista previa de las primeras filas:")
+        for i, row in df_completo.head(3).iterrows():
+            self.log(f"   Fila {i}: {row.to_dict()}")
+        
+        # Usar todos los registros
+        df_filtrado = df_completo
+        self.log(f"✅ Procesando TODOS los registros: {len(df_filtrado)}")
+        
+        if len(df_filtrado) == 0:
+            self.log("❌ No hay datos")
+            return
+        
+        # 🔥 CORRECCIÓN: Verificar y usar las columnas correctamente
+        columna_direccion = None
+        columna_nombre = None
+        columna_adscripcion = None
+        
+        # Verificar si tenemos columnas_seleccionadas
+        if hasattr(self, 'columnas_seleccionadas') and self.columnas_seleccionadas:
+            columna_direccion = self.columnas_seleccionadas.get('direccion')
+            columna_nombre = self.columnas_seleccionadas.get('nombre')
+            columna_adscripcion = self.columnas_seleccionadas.get('adscripcion')
             
-            # Limpiar carpetas
-            self._limpiar_carpetas_anteriores()
+            self.log(f"🎯 Columnas seleccionadas previamente:")
+            self.log(f"   • Dirección: '{columna_direccion}'")
+            self.log(f"   • Nombre: '{columna_nombre}'")
+            self.log(f"   • Adscripción: '{columna_adscripcion}'")
+        
+        # Si no hay columnas seleccionadas o son None, detectar automáticamente
+        if not columna_direccion:
+            columna_direccion = self._detectar_columna_direccion(df_filtrado)
+        if not columna_nombre:
+            columna_nombre = self._detectar_columna_nombre(df_filtrado)
+        if not columna_adscripcion:
+            columna_adscripcion = self._detectar_columna_adscripcion(df_filtrado)
+        
+        self.log(f"🎯 Columnas finales a usar:")
+        self.log(f"   • Dirección: '{columna_direccion}'")
+        self.log(f"   • Nombre: '{columna_nombre}'")
+        self.log(f"   • Adscripción: '{columna_adscripcion}'")
+        
+        # 🔥 VERIFICACIÓN CRÍTICA: Comprobar que las columnas existen
+        if columna_direccion not in df_filtrado.columns:
+            self.log(f"❌ ERROR: La columna '{columna_direccion}' no existe en el DataFrame")
+            self.log(f"   Columnas disponibles: {list(df_filtrado.columns)}")
             
-            # Cargar datos
-            df_completo = pd.read_excel(self.archivo_excel)
-            self.log(f"📊 Total de registros: {len(df_completo)}")
+            # Buscar la columna de dirección con diferentes nombres
+            posibles_nombres = ['DIRECCION', 'Direccion', 'DIRECCIÓN', 'Dirección', 'DOMICILIO', 'Domicilio', 'DIR']
+            for nombre in posibles_nombres:
+                if nombre in df_filtrado.columns:
+                    columna_direccion = nombre
+                    self.log(f"   🔍 Se encontró columna alternativa: '{nombre}'")
+                    break
             
-            # Usar todos los registros
-            df_filtrado = df_completo
-            self.log(f"✅ Procesando TODOS los registros: {len(df_filtrado)}")
-            
-            if len(df_filtrado) == 0:
-                self.log("❌ No hay datos")
+            if columna_direccion not in df_filtrado.columns:
+                messagebox.showerror("Error", f"No se encontró la columna de dirección.\n\nColumnas disponibles:\n{', '.join(df_filtrado.columns)}")
                 return
-            
-            # Usar columnas guardadas
-            if hasattr(self, 'columnas_seleccionadas') and self.columnas_seleccionadas:
-                columna_direccion = self.columnas_seleccionadas['direccion']
-                columna_nombre = self.columnas_seleccionadas['nombre']
-                columna_adscripcion = self.columnas_seleccionadas['adscripcion']
+        
+        # Verificar que tenemos nombre
+        if not columna_nombre:
+            # Buscar cualquier columna que pueda contener nombres
+            for col in df_filtrado.columns:
+                if any(p in str(col).lower() for p in ['nombre', 'name', 'persona', 'destinatario']):
+                    columna_nombre = col
+                    break
+        
+        if not columna_nombre:
+            columna_nombre = df_filtrado.columns[0]  # Usar primera columna como fallback
+        
+        # 🔥 CORRECCIÓN PRINCIPAL: Crear df_estandar con nombres fijos
+        df_estandar = df_filtrado.copy()
+        
+        # Usar la columna correcta para dirección
+        if columna_direccion in df_estandar.columns:
+            df_estandar['DIRECCIÓN'] = df_estandar[columna_direccion].astype(str)
+        else:
+            # Crear columna vacía si no existe
+            df_estandar['DIRECCIÓN'] = ''
+            self.log("⚠️ ADVERTENCIA: No se pudo encontrar columna de dirección")
+        
+        # Usar la columna correcta para nombre
+        if columna_nombre in df_estandar.columns:
+            df_estandar['NOMBRE'] = df_estandar[columna_nombre].astype(str)
+        else:
+            df_estandar['NOMBRE'] = 'Sin nombre'
+        
+        # Usar la columna correcta para adscripción
+        if columna_adscripcion and columna_adscripcion in df_estandar.columns:
+            df_estandar['ADSCRIPCIÓN'] = df_estandar[columna_adscripcion].astype(str)
+        else:
+            df_estandar['ADSCRIPCIÓN'] = 'Sin adscripción'
+        
+        # Agregar columna de alcaldía si existe
+        if hasattr(self, 'columnas_seleccionadas') and 'alcaldia' in self.columnas_seleccionadas:
+            columna_alcaldia = self.columnas_seleccionadas['alcaldia']
+            if columna_alcaldia and columna_alcaldia in df_estandar.columns:
+                df_estandar['ALCALDÍA'] = df_estandar[columna_alcaldia].astype(str)
             else:
-                # Fallback a detección automática
-                columna_direccion = self._detectar_columna_direccion(df_filtrado)
-                columna_nombre = self._detectar_columna_nombre(df_filtrado)
-                columna_adscripcion = self._detectar_columna_adscripcion(df_filtrado)
+                df_estandar['ALCALDÍA'] = ''
+        
+        self.log(f"🎯 DataFrame estandarizado: {len(df_estandar)} registros")
+        self.log(f"📋 Columnas finales: {list(df_estandar.columns)}")
+        
+        # Mostrar algunas filas para verificar
+        self.log("🔍 Ejemplo de datos procesados:")
+        for i, row in df_estandar.head(3).iterrows():
+            self.log(f"   • {row.get('NOMBRE', '')[:30]}... → {row.get('DIRECCIÓN', '')[:40]}...")
+        
+        # Generar rutas
+        generator = CoreRouteGenerator(
+            df=df_estandar,
+            api_key=self.api_key,
+            origen_coords=self.origen_coords,
+            origen_name=self.origen_name,
+            max_stops_per_route=self.max_stops
+        )
+        
+        # Conectar el logging
+        generator._log = self.log
+        resultados = generator.generate_routes()
+        
+        if resultados:
+            self.log(f"🎉 ¡{len(resultados)} RUTAS GENERADAS CON PARADAS POR EDIFICIO!")
+            self.log("🏢 Cada edificio con múltiples personas = 1 sola parada de ruta")
+            self.log("📱 Las rutas están listas para asignar a repartidores via Telegram")
             
-            self.log(f"🎯 Usando columnas - Dirección: '{columna_direccion}', Nombre: '{columna_nombre}'")
+            resumen = f"""
+            🎉 ¡{len(resultados)} RUTAS GENERADAS!
             
-            # Estandarizar
-            df_estandar = df_filtrado.copy()
-            df_estandar['DIRECCIÓN'] = df_filtrado[columna_direccion].astype(str)
-            df_estandar['NOMBRE'] = df_filtrado[columna_nombre].astype(str) if columna_nombre else 'Sin nombre'
-            df_estandar['ADSCRIPCIÓN'] = df_filtrado[columna_adscripcion].astype(str) if columna_adscripcion else 'Sin adscripción'
+            Características:
+            • Cada edificio con múltiples personas = 1 sola parada de ruta
+            • Rutas optimizadas para eficiencia
+            • Mapas interactivos generados
+            • Archivos Excel individuales para cada ruta
+            • Listo para asignar a repartidores via Telegram
             
-            self.log(f"🎯 Procesando {len(df_estandar)} registros...")
+            Las rutas están en las carpetas:
+            • mapas_pro/ - Mapas interactivos
+            • rutas_excel/ - Excels con detalles
+            • rutas_telegram/ - Archivos para el bot
+            """
+            messagebox.showinfo("Éxito", resumen)
+        else:
+            self.log("❌ No se pudieron generar rutas")
+            messagebox.showwarning("Advertencia", "No se pudieron generar rutas. Revisa el log para más detalles.")
             
-            # Generar rutas
-            generator = CoreRouteGenerator(
-                df=df_estandar,
-                api_key=self.api_key,
-                origen_coords=self.origen_coords,
-                origen_name=self.origen_name,
-                max_stops_per_route=self.max_stops
-            )
-            
-            generator._log = self.log
-            resultados = generator.generate_routes()
-            
-            if resultados:
-                self.log(f"🎉 ¡{len(resultados)} RUTAS GENERADAS CON PARADAS POR EDIFICIO!")
-                self.log("🏢 Cada edificio con múltiples personas = 1 sola parada de ruta")
-                self.log("📱 Las rutas están listas para asignar a repartidores via Telegram")
-                messagebox.showinfo("Éxito", f"¡{len(resultados)} rutas generadas!\n\nCada edificio con múltiples personas es una sola parada de ruta.\n\nAhora puedes asignarlas a repartidores usando el botón 'ASIGNAR RUTAS'")
-            else:
-                self.log("❌ No se pudieron generar rutas")
-                
-        except Exception as e:
-            self.log(f"❌ ERROR: {str(e)}")
-            messagebox.showerror("Error", f"Error durante el procesamiento:\n{str(e)}")
-        finally:
-            self.root.after(0, self._finalizar_procesamiento)
-
+    except Exception as e:
+        self.log(f"❌ ERROR: {str(e)}")
+        import traceback
+        self.log(traceback.format_exc())
+        messagebox.showerror("Error", f"Error durante el procesamiento:\n{str(e)}")
+    finally:
+        self.root.after(0, self._finalizar_procesamiento)
+        
     def _finalizar_procesamiento(self):
         self.procesando = False
         self.btn_generar.config(state='normal')
