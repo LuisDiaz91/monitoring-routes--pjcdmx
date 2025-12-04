@@ -533,8 +533,291 @@ def dar_ruta(message):
     
     bot.reply_to(message, mensaje, parse_mode='Markdown', reply_markup=markup)
 
+@bot.callback_query_handler(func=lambda call: call.data == "solicitar_ruta")
+def callback_solicitar_ruta(call):
+    """Handler para solicitar nueva ruta"""
+    try:
+        user_id = call.from_user.id
+        user_name = call.from_user.first_name
+        
+        print(f"🎯 Callback: Usuario {user_id} ({user_name}) solicitando ruta...")
+        
+        # Primero responder a la callback query
+        bot.answer_callback_query(call.id, "🔄 Procesando solicitud de ruta...")
+        
+        # Simular mensaje para activar dar_ruta
+        fake_message = type('obj', (object,), {
+            'from_user': type('obj', (object,), {
+                'id': user_id,
+                'first_name': user_name
+            })(),
+            'chat': type('obj', (object,), {
+                'id': call.message.chat.id
+            })(),
+            'message_id': call.message.message_id
+        })()
+        
+        # Llamar a la función dar_ruta
+        dar_ruta(fake_message)
+        
+    except Exception as e:
+        print(f"❌ Error en callback_solicitar_ruta: {e}")
+        bot.answer_callback_query(call.id, "❌ Error procesando solicitud")
+
+@bot.callback_query_handler(func=lambda call: call.data == "seguimiento_tiempo_real")
+def callback_seguimiento(call):
+    """Handler para seguimiento en tiempo real"""
+    try:
+        markup = types.InlineKeyboardMarkup()
+        markup.row(
+            types.InlineKeyboardButton("📍 COMPARTIR MI UBICACIÓN ACTUAL", 
+                                     callback_data="compartir_ubicacion"),
+            types.InlineKeyboardButton("🗺️ VER RUTA CON MAPA", 
+                                     callback_data="ver_ruta_actual")
+        )
+        markup.row(
+            types.InlineKeyboardButton("📸 REPORTAR ENTREGA", 
+                                     callback_data="reportar_entrega"),
+            types.InlineKeyboardButton("📋 REPORTAR INCIDENTE", 
+                                     callback_data="reportar_incidente")
+        )
+        
+        bot.edit_message_text(
+            chat_id=call.message.chat.id,
+            message_id=call.message.message_id,
+            text="📍 **SEGUIMIENTO EN TIEMPO REAL**\n\n"
+                 "Selecciona una opción:\n\n"
+                 "• **📍 COMPARTIR UBICACIÓN:** Envía tu ubicación actual\n"
+                 "• **🗺️ VER RUTA:** Muestra tu ruta actual\n"
+                 "• **📸 REPORTAR ENTREGA:** Envía foto de comprobante\n"
+                 "• **📋 REPORTAR INCIDENTE:** Reporta algún problema",
+            parse_mode='Markdown',
+            reply_markup=markup
+        )
+        bot.answer_callback_query(call.id, "✅ Opciones de seguimiento")
+        
+    except Exception as e:
+        print(f"❌ Error en callback_seguimiento: {e}")
+        bot.answer_callback_query(call.id, "❌ Error")
+
+@bot.callback_query_handler(func=lambda call: call.data == "contactar_supervisor")
+def callback_supervisor(call):
+    """Handler para contactar supervisor"""
+    try:
+        # Datos del supervisor (puedes cambiar estos)
+        supervisor_nombre = "Lic. Pedro Javier Hernandez"
+        supervisor_telefono = "+525531973078"
+        supervisor_correo = "pedro.hernandez@tsjcdmx.gob.mx"
+        
+        markup = types.InlineKeyboardMarkup()
+        markup.row(
+            types.InlineKeyboardButton("📞 LLAMAR SUPERVISOR", 
+                                     url=f"tel:{supervisor_telefono}"),
+            types.InlineKeyboardButton("📧 ENVIAR CORREO", 
+                                     url=f"mailto:{supervisor_correo}")
+        )
+        markup.row(
+            types.InlineKeyboardButton("📱 ENVIAR MENSAJE WHATSAPP", 
+                                     url=f"https://wa.me/{supervisor_telefono.replace('+', '')}"),
+        )
+        markup.row(
+            types.InlineKeyboardButton("↩️ VOLVER AL INICIO", 
+                                     callback_data="volver_inicio"),
+        )
+        
+        bot.edit_message_text(
+            chat_id=call.message.chat.id,
+            message_id=call.message.message_id,
+            text=f"📞 **CONTACTO CON SUPERVISOR**\n\n"
+                 f"**Supervisor:** {Pedro Javier Hernandez}\n"
+                 f"**Teléfono:** `{+525531973078}`\n"
+                 f"**Correo:** `{pedro.hernandez@tsjcdmx.gob.mx}`\n\n"
+                 f"**Horario de atención:**\n"
+                 f"• Lunes a Viernes: 8:00 - 18:00 hrs\n"
+                 f"• Sábados: 9:00 - 14:00 hrs\n\n"
+                 f"**Para emergencias fuera de horario:**\n"
+                 f"📞 Línea de emergencias: +525531973078",
+            parse_mode='Markdown',
+            reply_markup=markup
+        )
+        bot.answer_callback_query(call.id, "✅ Información de supervisor")
+        
+    except Exception as e:
+        print(f"❌ Error en callback_supervisor: {e}")
+        bot.answer_callback_query(call.id, "❌ Error")
+
+@bot.callback_query_handler(func=lambda call: call.data == "ubicacion_actual")
+def callback_ubicacion_actual(call):
+    """Handler para ubicación actual"""
+    try:
+        bot.answer_callback_query(call.id, 
+            "📍 Por favor, comparte tu ubicación usando el botón 📎 adjunto", 
+            show_alert=False)
+        
+        # Enviar mensaje solicitando ubicación
+        markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+        markup.row(types.KeyboardButton("📍 Compartir ubicación", request_location=True))
+        
+        bot.send_message(
+            call.message.chat.id,
+            "📍 **COMPARTIR UBICACIÓN**\n\n"
+            "Por favor, presiona el botón de abajo para compartir tu ubicación actual:",
+            reply_markup=markup,
+            parse_mode='Markdown'
+        )
+        
+    except Exception as e:
+        print(f"❌ Error en callback_ubicacion_actual: {e}")
+        bot.answer_callback_query(call.id, "❌ Error")
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("lista_completa_"))
+def callback_lista_completa(call):
+    """Handler para mostrar lista completa de edificios"""
+    try:
+        ruta_id = int(call.data.split("_")[-1])
+        user_id = call.from_user.id
+        
+        # Buscar la ruta
+        ruta_encontrada = None
+        for ruta in RUTAS_DISPONIBLES:
+            if ruta['ruta_id'] == ruta_id:
+                ruta_encontrada = ruta
+                break
+        
+        if not ruta_encontrada:
+            bot.answer_callback_query(call.id, "❌ Ruta no encontrada")
+            return
+        
+        paradas = ruta_encontrada.get('paradas', [])
+        
+        mensaje = f"📋 **LISTA COMPLETA DE EDIFICIOS**\n\n"
+        mensaje += f"Ruta ID: {ruta_id}\n"
+        mensaje += f"Zona: {ruta_encontrada.get('zona', 'N/A')}\n"
+        mensaje += f"Total edificios: {len(paradas)}\n\n"
+        
+        for i, parada in enumerate(paradas, 1):
+            nombre = parada.get('nombre', f'Edificio {i}')
+            direccion = parada.get('direccion', 'Sin dirección')
+            dependencia = parada.get('dependencia', 'N/A')
+            total_personas = parada.get('total_personas', 1)
+            
+            # Limpiar dirección para mostrar
+            direccion_limpia = limpiar_direccion_para_google_maps(direccion)
+            
+            mensaje += f"**📍 {i}. {nombre}**\n"
+            mensaje += f"   🏛️ {dependencia}\n"
+            mensaje += f"   📍 {direccion_limpia[:60]}...\n"
+            mensaje += f"   👥 {total_personas} persona{'s' if total_personas > 1 else ''}\n\n"
+        
+        # Crear botón de regreso
+        markup = types.InlineKeyboardMarkup()
+        markup.row(
+            types.InlineKeyboardButton("🗺️ VER RUTA EN MAPAS", callback_data="ver_ruta_actual"),
+            types.InlineKeyboardButton("↩️ VOLVER", callback_data="volver_inicio")
+        )
+        
+        try:
+            bot.edit_message_text(
+                chat_id=call.message.chat.id,
+                message_id=call.message.message_id,
+                text=mensaje,
+                parse_mode='Markdown',
+                reply_markup=markup
+            )
+        except:
+            # Si no se puede editar, enviar nuevo mensaje
+            bot.send_message(
+                call.message.chat.id,
+                mensaje,
+                parse_mode='Markdown',
+                reply_markup=markup
+            )
+        
+        bot.answer_callback_query(call.id, f"✅ Mostrando {len(paradas)} edificios")
+        
+    except Exception as e:
+        print(f"❌ Error en callback_lista_completa: {e}")
+        bot.answer_callback_query(call.id, "❌ Error")
+
+@bot.callback_query_handler(func=lambda call: call.data == "volver_inicio")
+def callback_volver_inicio(call):
+    """Handler para volver al menú principal"""
+    try:
+        markup = types.InlineKeyboardMarkup()
+        markup.row(
+            types.InlineKeyboardButton("🚗 SOLICITAR RUTA", callback_data="solicitar_ruta"),
+            types.InlineKeyboardButton("🗺️ VER RUTA ACTUAL", callback_data="ver_ruta_actual")
+        )
+        markup.row(
+            types.InlineKeyboardButton("📍 SEGUIMIENTO", callback_data="seguimiento_tiempo_real"),
+            types.InlineKeyboardButton("📞 SUPERVISOR", callback_data="contactar_supervisor")
+        )
+        
+        bot.edit_message_text(
+            chat_id=call.message.chat.id,
+            message_id=call.message.message_id,
+            text="🤖 **BOT PJCDMX - SISTEMA DE ENTREGAS**\n\n"
+                 "🚀 **¿Qué necesitas hacer?**\n\n"
+                 "• 🚗 **SOLICITAR RUTA:** Obtén tu ruta de entregas optimizada\n"
+                 "• 🗺️ **VER RUTA:** Muestra tu ruta actual con botón para Google Maps\n"
+                 "• 📍 **SEGUIMIENTO:** Comparte tu ubicación en tiempo real\n"
+                 "• 📞 **SUPERVISOR:** Contacta a tu supervisor inmediatamente\n\n"
+                 "👉 **Selecciona una opción:**",
+            parse_mode='Markdown',
+            reply_markup=markup
+        )
+        bot.answer_callback_query(call.id, "✅ Menú principal")
+        
+    except Exception as e:
+        print(f"❌ Error en callback_volver_inicio: {e}")
+        bot.answer_callback_query(call.id, "❌ Error")
+
+# Handler para ubicaciones compartidas
+@bot.message_handler(content_types=['location'])
+def handle_location(message):
+    """Procesar ubicación compartida por el usuario"""
+    try:
+        user_id = message.from_user.id
+        latitud = message.location.latitude
+        longitud = message.location.longitude
+        
+        print(f"📍 Ubicación recibida de {user_id}: {latitud}, {longitud}")
+        
+        # Crear URL de Google Maps con la ubicación
+        maps_url = f"https://www.google.com/maps?q={latitud},{longitud}"
+        
+        markup = types.InlineKeyboardMarkup()
+        markup.row(
+            types.InlineKeyboardButton("🗺️ VER EN GOOGLE MAPS", url=maps_url),
+            types.InlineKeyboardButton("📍 GUARDAR UBICACIÓN", callback_data=f"guardar_ubicacion_{latitud}_{longitud}")
+        )
+        markup.row(
+            types.InlineKeyboardButton("📤 COMPARTIR CON SUPERVISOR", 
+                                     callback_data=f"compartir_supervisor_{latitud}_{longitud}"),
+            types.InlineKeyboardButton("↩️ VOLVER", callback_data="volver_inicio")
+        )
+        
+        bot.send_message(
+            message.chat.id,
+            f"📍 **UBICACIÓN RECIBIDA**\n\n"
+            f"✅ Tu ubicación ha sido registrada:\n"
+            f"• **Latitud:** `{latitud}`\n"
+            f"• **Longitud:** `{longitud}`\n\n"
+            f"**Hora de registro:** {datetime.now().strftime('%H:%M:%S')}\n\n"
+            f"¿Qué quieres hacer con esta ubicación?",
+            parse_mode='Markdown',
+            reply_markup=markup
+        )
+        
+    except Exception as e:
+        print(f"❌ Error procesando ubicación: {e}")
+        bot.send_message(message.chat.id, "❌ Error procesando tu ubicación")
+
+# AGREGAR HANDLERS QUE FALTAN DEL CÓDIGO ORIGINAL
+
 @bot.callback_query_handler(func=lambda call: call.data == "ver_ruta_actual")
 def callback_ver_ruta_actual(call):
+    """Handler para ver ruta actual (del código original)"""
     user_id = call.from_user.id
     user_name = call.from_user.first_name
     
@@ -616,6 +899,53 @@ def callback_ver_ruta_actual(call):
             parse_mode='Markdown',
             reply_markup=markup
         )
+
+# Handlers para callbacks adicionales
+@bot.callback_query_handler(func=lambda call: call.data.startswith("detalles_ruta_"))
+def callback_detalles_ruta(call):
+    """Handler para detalles de ruta"""
+    bot.answer_callback_query(call.id, "📋 Mostrando detalles...")
+    bot.send_message(call.message.chat.id, "📋 **Detalles de ruta**\n\nEsta función está en desarrollo.")
+
+@bot.callback_query_handler(func=lambda call: call.data == "actualizar_ruta")
+def callback_actualizar_ruta(call):
+    """Handler para actualizar ruta"""
+    bot.answer_callback_query(call.id, "🔄 Actualizando ruta...")
+    bot.send_message(call.message.chat.id, "🔄 **Actualizar ruta**\n\nEsta función está en desarrollo.")
+
+@bot.callback_query_handler(func=lambda call: call.data == "cambiar_ruta")
+def callback_cambiar_ruta(call):
+    """Handler para cambiar ruta"""
+    user_id = call.from_user.id
+    if user_id in RUTAS_ASIGNADAS:
+        del RUTAS_ASIGNADAS[user_id]
+    
+    bot.answer_callback_query(call.id, "🔄 Cambiando ruta...")
+    
+    # Simular mensaje para activar dar_ruta
+    fake_message = type('obj', (object,), {
+        'from_user': type('obj', (object,), {
+            'id': user_id,
+            'first_name': call.from_user.first_name
+        })(),
+        'chat': type('obj', (object,), {
+            'id': call.message.chat.id
+        })(),
+        'message_id': call.message.message_id
+    })()
+    
+    dar_ruta(fake_message)
+
+@bot.callback_query_handler(func=lambda call: call.data == "sin_maps")
+def callback_sin_maps(call):
+    """Handler cuando Google Maps no está disponible"""
+    bot.answer_callback_query(call.id, "❌ Google Maps no disponible para esta ruta")
+
+@bot.callback_query_handler(func=lambda call: call.data in ["compartir_ubicacion", "reportar_entrega", "reportar_incidente", 
+                                                           "guardar_ubicacion", "compartir_supervisor"])
+def callback_funciones_en_desarrollo(call):
+    """Handler para funciones en desarrollo"""
+    bot.answer_callback_query(call.id, "🔧 Función en desarrollo")
 
 @bot.message_handler(commands=['maps', 'googlemaps', 'navegar', 'ruta_maps'])
 def navegar_ruta(message):
@@ -836,9 +1166,23 @@ def recibir_rutas_desde_programa():
 # INICIALIZACIÓN
 # =============================================================================
 
+def configurar_webhook():
+    """Configurar webhook en Telegram"""
+    # Obtener la URL del webhook desde variable de entorno o usar una por defecto
+    webhook_url = os.environ.get('WEBHOOK_URL', 'https://tu-dominio.com/webhook')
+    bot.remove_webhook()
+    bot.set_webhook(url=webhook_url)
+    print(f"✅ Webhook configurado: {webhook_url}")
+
 print("🎯 CARGANDO SISTEMA COMPLETO CON GOOGLE MAPS INTEGRADO Y CORREGIDO...")
 cargar_rutas_simple()
+
+# Configurar webhook después de cargar rutas
+configurar_webhook()
+
 print("✅ BOT LISTO - GOOGLE MAPS ACTIVADO Y VERIFICADO")
+print(f"📊 Rutas disponibles: {len(RUTAS_DISPONIBLES)}")
+print(f"🗺️ Rutas con Google Maps: {sum(1 for r in RUTAS_DISPONIBLES if r.get('google_maps_url'))}")
 
 if __name__ == "__main__":
     port = int(os.environ.get('PORT', 8080))
